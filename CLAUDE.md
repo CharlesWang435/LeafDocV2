@@ -58,7 +58,7 @@ com.leafdoc.app/
 
 1. **Capture Flow**: `CameraScreen` → `ProCameraController` (CameraX) → `CameraViewModel` → `ImageRepository` saves segments → `LeafSessionRepository` stores metadata in Room
 
-2. **Stitching Flow**: `CameraViewModel.finishSession()` → `ImageStitcher.stitchImages()` → correlation-based alignment → gradient blending → saves panorama
+2. **Stitching Flow**: `CameraViewModel.finishSession()` → `SimpleStitcher.stitchImages()` → left-to-right concatenation with gradient blending → saves panorama
 
 3. **Diagnosis Flow**: `ResultsViewModel.analyzeDiagnosis()` → `DiagnosisRepository` → `DiagnosisApiService` (Plant.id API) → parses response → updates Room
 
@@ -66,9 +66,9 @@ com.leafdoc.app/
 
 - **ProCameraController** (`camera/`): Wraps CameraX with Camera2 interop for manual ISO, shutter speed, focus distance, white balance control. Uses `CaptureRequestOptions` to override auto settings.
 
-- **ImageStitcher** (`stitching/`): Horizontal stitching using normalized cross-correlation for alignment and linear gradient blending. Segments are stitched left-to-right as the leaf passes through the device.
+- **SimpleStitcher** (`stitching/`): Simple horizontal concatenation with configurable overlap blending. Segments are stitched left-to-right (base to tip) with linear gradient blending in overlap regions. No complex alignment - designed for the manual capture workflow.
 
-- **OverlapGuide** (`stitching/`): Provides real-time visual guidance by showing previous segment edge overlay and calculating alignment scores.
+- **CropRectangleOverlay** (`ui/camera/`): Draggable crop rectangle for defining the capture region on screen. Users resize/reposition to match their light board area. Captured images are cropped to this region before stitching.
 
 ### Database Schema
 

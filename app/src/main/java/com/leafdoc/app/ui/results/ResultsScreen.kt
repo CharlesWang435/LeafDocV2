@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.leafdoc.app.data.model.*
+import com.leafdoc.app.ui.components.ClickableZoomableImage
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -212,9 +213,9 @@ private fun ImagePreviewCard(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (imagePath != null) {
-                AsyncImage(
-                    model = imagePath,
-                    contentDescription = "Stitched leaf image",
+                ClickableZoomableImage(
+                    imagePath = imagePath,
+                    contentDescription = "Stitched leaf image - tap to zoom",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )

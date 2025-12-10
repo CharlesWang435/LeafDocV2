@@ -52,20 +52,39 @@ fun SettingsScreen(
         ) {
             // User Information Section
             SettingsSection(title = "User Information") {
-                var editingFarmerId by remember { mutableStateOf(false) }
-                var editingFieldId by remember { mutableStateOf(false) }
+                // Local state to prevent cursor jumping
+                var farmerIdInput by remember { mutableStateOf(farmerId) }
+                var fieldIdInput by remember { mutableStateOf(fieldId) }
+
+                // Sync local state with flow state only when flow changes
+                LaunchedEffect(farmerId) {
+                    if (farmerIdInput != farmerId) {
+                        farmerIdInput = farmerId
+                    }
+                }
+                LaunchedEffect(fieldId) {
+                    if (fieldIdInput != fieldId) {
+                        fieldIdInput = fieldId
+                    }
+                }
 
                 SettingsTextField(
                     label = "Default Farmer ID",
-                    value = farmerId,
-                    onValueChange = { viewModel.updateFarmerId(it) },
+                    value = farmerIdInput,
+                    onValueChange = {
+                        farmerIdInput = it
+                        viewModel.updateFarmerId(it)
+                    },
                     icon = Icons.Default.Person
                 )
 
                 SettingsTextField(
                     label = "Default Field ID",
-                    value = fieldId,
-                    onValueChange = { viewModel.updateFieldId(it) },
+                    value = fieldIdInput,
+                    onValueChange = {
+                        fieldIdInput = it
+                        viewModel.updateFieldId(it)
+                    },
                     icon = Icons.Default.Landscape
                 )
             }
@@ -132,15 +151,15 @@ fun SettingsScreen(
             // Stitching Settings Section
             SettingsSection(title = "Stitching") {
                 SettingsSlider(
-                    label = "Overlap Guide",
+                    label = "Blend Overlap",
                     value = overlapPercentage.toFloat(),
-                    valueRange = 10f..50f,
+                    valueRange = 5f..25f,
                     valueText = "$overlapPercentage%",
                     onValueChange = { viewModel.updateOverlapPercentage(it.toInt()) }
                 )
 
                 Text(
-                    text = "Recommended: 20-30% overlap for best stitching results",
+                    text = "Overlap region for blending between segments. 10-15% recommended for smooth transitions.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

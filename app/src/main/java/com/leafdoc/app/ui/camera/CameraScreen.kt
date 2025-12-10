@@ -13,7 +13,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -63,6 +65,9 @@ fun CameraScreen(
     val cameraSettings by viewModel.cameraSettings.collectAsState()
     val capturedSegments by viewModel.capturedSegments.collectAsState()
     val overlapPercentage by viewModel.overlapPercentage.collectAsState()
+    val defaultFarmerId by viewModel.defaultFarmerId.collectAsState()
+    val defaultFieldId by viewModel.defaultFieldId.collectAsState()
+    val cropRect by viewModel.cropRect.collectAsState()
 
     var cameraController by remember { mutableStateOf<ProCameraController?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
@@ -86,6 +91,8 @@ fun CameraScreen(
         if (uiState.sessionComplete && uiState.stitchedImagePath != null) {
             uiState.sessionId?.let { sessionId ->
                 onNavigateToResults(sessionId)
+                // Reset state after navigation to prevent stale navigation state
+                viewModel.resetForNewCapture()
             }
         }
     }
@@ -142,13 +149,13 @@ fun CameraScreen(
                 )
             }
 
-            // Overlap Guide (show previous segment edge)
-            if (uiState.sessionActive && capturedSegments.isNotEmpty()) {
-                OverlapGuideOverlay(
-                    overlapPercentage = overlapPercentage,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            // Crop Rectangle Overlay (always visible during session)
+            CropRectangleOverlay(
+                cropRect = cropRect,
+                onCropRectChanged = { viewModel.updateCropRect(it) },
+                enabled = !uiState.isProcessing,
+                modifier = Modifier.fillMaxSize()
+            )
 
             // Top Bar
             TopBar(
@@ -174,12 +181,14 @@ fun CameraScreen(
                 )
             }
 
-            // Pro Controls Panel
+            // Pro Controls Panel - positioned on right side for better leaf visibility
             AnimatedVisibility(
                 visible = showProControls,
-                enter = slideInVertically(initialOffsetY = { it }),
-                exit = slideOutVertically(targetOffsetY = { it }),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                enter = slideInHorizontally(initialOffsetX = { it }),
+                exit = slideOutHorizontally(targetOffsetX = { it }),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(0.7f)
             ) {
                 ProControlsPanel(
                     settings = cameraSettings,
@@ -191,9 +200,7 @@ fun CameraScreen(
                     onExposureCompensationChange = { viewModel.updateExposureCompensation(it) },
                     onFlashChange = { viewModel.updateFlashMode(it) },
                     onClose = { showProControls = false },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 200.dp)
+                    modifier = Modifier.fillMaxHeight()
                 )
             }
 
@@ -264,6 +271,8 @@ fun CameraScreen(
     // Session Start Dialog
     if (showSessionDialog) {
         SessionStartDialog(
+            defaultFarmerId = defaultFarmerId,
+            defaultFieldId = defaultFieldId,
             onDismiss = { showSessionDialog = false },
             onConfirm = { farmerId, fieldId, leafNumber ->
                 viewModel.startNewSession(farmerId, fieldId, leafNumber)
@@ -516,42 +525,6 @@ private fun GridOverlay(
 }
 
 @Composable
-private fun OverlapGuideOverlay(
-    overlapPercentage: Int,
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val overlapWidth = size.width * overlapPercentage / 100
-
-        // Semi-transparent overlay for overlap region
-        drawRect(
-            color = Color.Green.copy(alpha = 0.2f),
-            topLeft = Offset(0f, 0f),
-            size = androidx.compose.ui.geometry.Size(overlapWidth, size.height)
-        )
-
-        // Border line
-        drawLine(
-            color = Color.Green,
-            start = Offset(overlapWidth, 0f),
-            end = Offset(overlapWidth, size.height),
-            strokeWidth = 3.dp.toPx()
-        )
-
-        // Arrow indicators
-        val arrowSize = 20.dp.toPx()
-        val arrowY = size.height / 2
-
-        val path = Path().apply {
-            moveTo(overlapWidth + arrowSize, arrowY - arrowSize / 2)
-            lineTo(overlapWidth + 5.dp.toPx(), arrowY)
-            lineTo(overlapWidth + arrowSize, arrowY + arrowSize / 2)
-        }
-        drawPath(path, Color.Green, style = Stroke(width = 2.dp.toPx()))
-    }
-}
-
-@Composable
 private fun HistogramView(
     data: IntArray,
     modifier: Modifier = Modifier
@@ -710,11 +683,13 @@ private fun PermissionRequest(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SessionStartDialog(
+    defaultFarmerId: String,
+    defaultFieldId: String,
     onDismiss: () -> Unit,
     onConfirm: (farmerId: String, fieldId: String, leafNumber: Int) -> Unit
 ) {
-    var farmerId by remember { mutableStateOf("") }
-    var fieldId by remember { mutableStateOf("") }
+    var farmerId by remember { mutableStateOf(defaultFarmerId) }
+    var fieldId by remember { mutableStateOf(defaultFieldId) }
     var leafNumber by remember { mutableStateOf("1") }
 
     AlertDialog(
@@ -780,12 +755,14 @@ private fun ProControlsPanel(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.width(280.dp),
         color = Color.Black.copy(alpha = 0.85f),
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -795,7 +772,7 @@ private fun ProControlsPanel(
                 Text(
                     text = "Pro Controls",
                     color = Color.White,
-                    fontSize = 18.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 IconButton(onClick = onClose) {
@@ -807,7 +784,7 @@ private fun ProControlsPanel(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // ISO Control
             ControlRow(

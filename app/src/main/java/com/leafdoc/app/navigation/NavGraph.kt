@@ -38,7 +38,12 @@ fun NavGraph(
                     navController.navigate(Screen.Settings.route)
                 },
                 onNavigateToResults = { sessionId ->
-                    navController.navigate(Screen.Results.createRoute(sessionId))
+                    navController.navigate(Screen.Results.createRoute(sessionId)) {
+                        // Remove Camera from backstack when navigating to Results after session complete
+                        // This prevents multiple back presses and ensures clean navigation
+                        popUpTo(Screen.Camera.route) { inclusive = false }
+                        launchSingleTop = true
+                    }
                 }
             )
         }

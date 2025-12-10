@@ -8,6 +8,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.leafdoc.app.data.model.DiagnosisStatus
 import com.leafdoc.app.data.model.LeafSession
+import com.leafdoc.app.ui.components.ZoomableImageDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -210,6 +213,7 @@ private fun SessionCard(
     onLongClick: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
+    var showZoomDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -237,8 +241,23 @@ private fun SessionCard(
             if (session.stitchedImagePath != null) {
                 AsyncImage(
                     model = session.stitchedImagePath,
-                    contentDescription = "Leaf image",
-                    modifier = Modifier.fillMaxSize(),
+                    contentDescription = "Leaf image - tap to view, long press for options",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isSelectionMode) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (isSelectionMode) {
+                                        onClick()
+                                    } else {
+                                        showZoomDialog = true
+                                    }
+                                },
+                                onLongPress = {
+                                    onLongClick()
+                                }
+                            )
+                        },
                     contentScale = ContentScale.Crop
                 )
             } else {
@@ -338,6 +357,14 @@ private fun SessionCard(
                 }
             }
         }
+    }
+
+    // Zoom dialog
+    if (showZoomDialog && session.stitchedImagePath != null) {
+        ZoomableImageDialog(
+            imagePath = session.stitchedImagePath,
+            onDismiss = { showZoomDialog = false }
+        )
     }
 }
 

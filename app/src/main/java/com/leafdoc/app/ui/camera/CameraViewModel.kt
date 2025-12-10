@@ -5,12 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.leafdoc.app.camera.CapturedImage
 import com.leafdoc.app.camera.CameraState
+import android.graphics.Rect as AndroidRect
 import com.leafdoc.app.data.model.*
 import com.leafdoc.app.data.preferences.UserPreferencesManager
 import com.leafdoc.app.data.repository.ImageRepository
 import com.leafdoc.app.data.repository.LeafSessionRepository
-import com.leafdoc.app.stitching.ImageStitcher
-import com.leafdoc.app.stitching.OverlapGuide
+import com.leafdoc.app.stitching.SimpleStitcher
 import com.leafdoc.app.stitching.StitchResult
 import com.leafdoc.app.util.LocationData
 import com.leafdoc.app.util.LocationManager
@@ -36,14 +36,22 @@ class CameraViewModel @Inject constructor(
     private val _capturedSegments = MutableStateFlow<List<CapturedSegmentInfo>>(emptyList())
     val capturedSegments: StateFlow<List<CapturedSegmentInfo>> = _capturedSegments.asStateFlow()
 
-    private val imageStitcher = ImageStitcher()
-    private val overlapGuide = OverlapGuide()
+    private val _cropRect = MutableStateFlow(CropRect())
+    val cropRect: StateFlow<CropRect> = _cropRect.asStateFlow()
+
+    private val simpleStitcher = SimpleStitcher()
 
     private var currentSession: LeafSession? = null
     private var currentLocation: LocationData? = null
 
     val overlapPercentage: StateFlow<Int> = preferencesManager.overlapGuidePercentage
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 25)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 10)
+
+    val defaultFarmerId: StateFlow<String> = preferencesManager.farmerId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val defaultFieldId: StateFlow<String> = preferencesManager.fieldId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     init {
         loadSettings()
@@ -81,7 +89,6 @@ class CameraViewModel @Inject constructor(
                     locationAccuracy = currentLocation?.accuracy
                 )
                 _capturedSegments.value = emptyList()
-                overlapGuide.clear()
 
                 _uiState.update { it.copy(
                     sessionActive = true,
@@ -108,13 +115,18 @@ class CameraViewModel @Inject constructor(
 
             var imagePath: String? = null
             var thumbnailPath: String? = null
+            var croppedBitmap: Bitmap? = null
 
             try {
                 val segmentIndex = _capturedSegments.value.size
 
-                // Save image to storage
+                // Crop the captured image according to the crop rectangle
+                val currentCropRect = _cropRect.value
+                croppedBitmap = cropBitmap(capturedImage.bitmap, currentCropRect)
+
+                // Save cropped image to storage
                 imagePath = imageRepository.saveSegmentImage(
-                    bitmap = capturedImage.bitmap,
+                    bitmap = croppedBitmap,
                     sessionId = session.id,
                     segmentIndex = segmentIndex
                 )
@@ -122,29 +134,16 @@ class CameraViewModel @Inject constructor(
                 // Create thumbnail
                 thumbnailPath = imageRepository.createThumbnail(imagePath)
 
-                // Calculate overlap if not first segment
-                val overlap = if (segmentIndex > 0) {
-                    val previousBitmap = _capturedSegments.value.lastOrNull()?.let {
-                        imageRepository.loadBitmap(it.imagePath)
-                    }
-                    if (previousBitmap != null) {
-                        val calculatedOverlap = imageStitcher.calculateOverlap(previousBitmap, capturedImage.bitmap)
-                        previousBitmap.recycle()
-                        calculatedOverlap
-                    } else {
-                        overlapPercentage.value / 100f
-                    }
-                } else {
-                    0f
-                }
+                // Use fixed overlap percentage from settings (no auto-calculation)
+                val overlap = overlapPercentage.value / 100f
 
                 // Add segment to database
                 val segment = sessionRepository.addSegment(
                     sessionId = session.id,
                     imagePath = imagePath,
                     thumbnailPath = thumbnailPath,
-                    width = capturedImage.width,
-                    height = capturedImage.height,
+                    width = croppedBitmap.width,
+                    height = croppedBitmap.height,
                     iso = capturedImage.iso,
                     shutterSpeed = capturedImage.shutterSpeed,
                     focusDistance = capturedImage.focusDistance,
@@ -162,12 +161,6 @@ class CameraViewModel @Inject constructor(
                     timestamp = capturedImage.timestamp
                 )
                 _capturedSegments.update { it + segmentInfo }
-
-                // Update overlap guide for next capture
-                overlapGuide.setPreviousSegment(
-                    capturedImage.bitmap,
-                    overlapPercentage.value / 100f
-                )
 
                 _uiState.update { it.copy(
                     isProcessing = false,
@@ -189,8 +182,25 @@ class CameraViewModel @Inject constructor(
                     isProcessing = false,
                     error = "Failed to save segment: ${e.message}"
                 )}
+            } finally {
+                croppedBitmap?.recycle()
             }
         }
+    }
+
+    /**
+     * Crops a bitmap according to the given crop rectangle.
+     */
+    private fun cropBitmap(source: Bitmap, cropRect: CropRect): Bitmap {
+        val left = (source.width * cropRect.left).toInt().coerceIn(0, source.width - 1)
+        val top = (source.height * cropRect.top).toInt().coerceIn(0, source.height - 1)
+        val right = (source.width * cropRect.right).toInt().coerceIn(left + 1, source.width)
+        val bottom = (source.height * cropRect.bottom).toInt().coerceIn(top + 1, source.height)
+
+        val width = right - left
+        val height = bottom - top
+
+        return Bitmap.createBitmap(source, left, top, width, height)
     }
 
     fun finishSession() {
@@ -219,9 +229,9 @@ class CameraViewModel @Inject constructor(
                     throw Exception("Failed to load segment images")
                 }
 
-                // Stitch images
+                // Stitch images using simple stitcher
                 val overlapPercent = overlapPercentage.value / 100f
-                val stitchResult = imageStitcher.stitchImages(bitmaps, overlapPercent)
+                val stitchResult = simpleStitcher.stitchImages(bitmaps, overlapPercent)
 
                 // Recycle loaded bitmaps
                 bitmaps.forEach { it.recycle() }
@@ -278,7 +288,6 @@ class CameraViewModel @Inject constructor(
 
             currentSession = null
             _capturedSegments.value = emptyList()
-            overlapGuide.clear()
 
             _uiState.update { it.copy(
                 sessionActive = false,
@@ -301,17 +310,6 @@ class CameraViewModel @Inject constructor(
                 lastSegment.thumbnailPath?.let { imageRepository.deleteImage(it) }
 
                 _capturedSegments.update { it.dropLast(1) }
-
-                // Update overlap guide
-                val newLast = _capturedSegments.value.lastOrNull()
-                if (newLast != null) {
-                    imageRepository.loadBitmap(newLast.imagePath)?.let { bitmap ->
-                        overlapGuide.setPreviousSegment(bitmap, overlapPercentage.value / 100f)
-                        bitmap.recycle()
-                    }
-                } else {
-                    overlapGuide.clear()
-                }
 
                 _uiState.update { it.copy(
                     segmentCount = _capturedSegments.value.size,
@@ -391,13 +389,8 @@ class CameraViewModel @Inject constructor(
         )}
     }
 
-    suspend fun getOverlapGuideBitmap(width: Int, height: Int): Bitmap? {
-        return overlapGuide.createOverlayGuide(width, height)
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        overlapGuide.release()
+    fun updateCropRect(cropRect: CropRect) {
+        _cropRect.value = cropRect
     }
 }
 
