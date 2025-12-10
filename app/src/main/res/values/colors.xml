@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LeafDoc Brand Colors -->
+    <color name="leaf_green">#2E7D32</color>
+    <color name="leaf_green_light">#60AD5E</color>
+    <color name="leaf_green_dark">#005005</color>
+    <color name="leaf_yellow">#F9A825</color>
+    <color name="leaf_brown">#5D4037</color>
+
+    <!-- Primary Colors -->
+    <color name="primary">#2E7D32</color>
+    <color name="primary_variant">#005005</color>
+    <color name="on_primary">#FFFFFF</color>
+
+    <!-- Secondary Colors -->
+    <color name="secondary">#F9A825</color>
+    <color name="secondary_variant">#C17900</color>
+    <color name="on_secondary">#000000</color>
+
+    <!-- Background Colors -->
+    <color name="background">#FFFBFE</color>
+    <color name="surface">#FFFBFE</color>
+    <color name="on_background">#1C1B1F</color>
+    <color name="on_surface">#1C1B1F</color>
+
+    <!-- Status Colors -->
+    <color name="healthy_green">#4CAF50</color>
+    <color name="warning_yellow">#FFC107</color>
+    <color name="error_red">#F44336</color>
+    <color name="info_blue">#2196F3</color>
+
+    <!-- Diagnosis Status Colors -->
+    <color name="status_pending">#9E9E9E</color>
+    <color name="status_uploading">#2196F3</color>
+    <color name="status_processing">#2196F3</color>
+    <color name="status_completed">#4CAF50</color>
+    <color name="status_failed">#F44336</color>
+
+    <!-- Camera UI Colors -->
+    <color name="camera_overlay">#80000000</color>
+    <color name="grid_line">#80FFFFFF</color>
+    <color name="overlap_guide">#4D4CAF50</color>
+    <color name="focus_indicator">#00FF00</color>
+    <color name="zebra_stripe">#FF0000</color>
+
+    <!-- Transparent variants -->
+    <color name="transparent">#00000000</color>
+    <color name="semi_transparent_black">#80000000</color>
+    <color name="semi_transparent_white">#80FFFFFF</color>
+</resources>

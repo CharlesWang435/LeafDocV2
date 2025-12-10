@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew assembleDebug:*)",
+      "Bash(gradlew.bat assembleDebug:*)",
+      "Bash(cmd /c \"cd /d c:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug\")",
+      "Bash(cmd /c \"cd /d c:\\Users\\wangc\\Downloads\\LeafDocV2 && dir\")",
+      "Bash(cmd /c \"cd /d c:\\Users\\wangc\\Downloads\\LeafDocV2 && gradle wrapper --gradle-version 8.9\")",
+      "Bash(cmd /c \"gradle wrapper --gradle-version 8.9\")",
+      "Bash(where:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

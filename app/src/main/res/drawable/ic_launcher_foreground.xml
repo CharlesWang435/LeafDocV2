@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Leaf shape - centered in the safe zone (24dp inset on each side) -->
+    <group
+        android:translateX="54"
+        android:translateY="54">
+
+        <!-- Main leaf body -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M-18,20
+                Q-20,10 -15,0
+                Q-10,-15 0,-20
+                Q10,-15 15,0
+                Q20,10 18,20
+                Q10,25 0,22
+                Q-10,25 -18,20
+                Z"/>
+
+        <!-- Leaf vein - center -->
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="2"
+            android:pathData="M0,-18 L0,20"/>
+
+        <!-- Leaf veins - left -->
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,-10 L-10,0"/>
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,0 L-12,8"/>
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,10 L-10,16"/>
+
+        <!-- Leaf veins - right -->
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,-10 L10,0"/>
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,0 L12,8"/>
+        <path
+            android:strokeColor="#2E7D32"
+            android:strokeWidth="1.5"
+            android:pathData="M0,10 L10,16"/>
+    </group>
+</vector>
