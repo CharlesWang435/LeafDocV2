@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LeafDoc</string>
+
+    <!-- Camera Screen -->
+    <string name="camera_permission_required">Camera Permission Required</string>
+    <string name="camera_permission_rationale">LeafDoc needs camera and location access to capture and tag leaf images.</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="capture">Capture</string>
+    <string name="start_session">Start Session</string>
+    <string name="finish_session">Finish</string>
+    <string name="cancel_session">Cancel</string>
+    <string name="delete_last">Delete Last</string>
+    <string name="pro_controls">Pro Controls</string>
+    <string name="segments_captured">%d segments</string>
+
+    <!-- Session Dialog -->
+    <string name="start_new_session">Start New Session</string>
+    <string name="farmer_id">Farmer ID (optional)</string>
+    <string name="field_id">Field ID (optional)</string>
+    <string name="leaf_number">Leaf Number</string>
+    <string name="start_capture">Start Capture</string>
+
+    <!-- Camera Controls -->
+    <string name="iso">ISO</string>
+    <string name="shutter_speed">Shutter</string>
+    <string name="white_balance">WB</string>
+    <string name="flash">Flash</string>
+    <string name="exposure">Exposure</string>
+    <string name="focus">Focus</string>
+    <string name="auto">Auto</string>
+    <string name="manual">Manual</string>
+
+    <!-- Gallery Screen -->
+    <string name="leaf_gallery">Leaf Gallery</string>
+    <string name="no_sessions">No leaf sessions yet</string>
+    <string name="no_sessions_hint">Start capturing leaf images to see them here</string>
+    <string name="delete_sessions">Delete Sessions</string>
+    <string name="delete_confirmation">Are you sure you want to delete %d session(s)? This action cannot be undone.</string>
+    <string name="select_all">Select All</string>
+    <string name="selected_count">%d selected</string>
+
+    <!-- Filter Options -->
+    <string name="filter_all">All</string>
+    <string name="filter_completed">Completed</string>
+    <string name="filter_pending">Pending</string>
+    <string name="filter_diagnosed">Diagnosed</string>
+
+    <!-- Results Screen -->
+    <string name="leaf_analysis">Leaf Analysis</string>
+    <string name="session_details">Session Details</string>
+    <string name="leaf_number_format">Leaf #%d</string>
+    <string name="captured_at">Captured</string>
+    <string name="location">Location</string>
+    <string name="segments">segments</string>
+
+    <!-- Diagnosis -->
+    <string name="ai_diagnosis">AI Diagnosis</string>
+    <string name="analyze_with_ai">Analyze with AI</string>
+    <string name="analyzing">Analyzing…</string>
+    <string name="analysis_complete">Analysis complete</string>
+    <string name="retry_analysis">Retry Analysis</string>
+    <string name="primary_finding">Primary Finding</string>
+    <string name="confidence">confidence</string>
+    <string name="recommendations">Recommendations</string>
+    <string name="healthy">Healthy</string>
+    <string name="issues_detected">Issues Detected</string>
+    <string name="health_score">Health Score</string>
+
+    <!-- Export -->
+    <string name="export_image">Export Image</string>
+    <string name="export_options">Export Options</string>
+    <string name="export_format">Format</string>
+    <string name="export_quality">Quality</string>
+    <string name="export_to_gallery">Export to Gallery</string>
+    <string name="exporting">Exporting…</string>
+    <string name="export_success">Image exported successfully</string>
+    <string name="select_format">Select format:</string>
+
+    <!-- Image Formats -->
+    <string name="format_jpeg">JPEG</string>
+    <string name="format_jpeg_desc">Smaller file size, adjustable quality</string>
+    <string name="format_png">PNG</string>
+    <string name="format_png_desc">Lossless, larger file size</string>
+    <string name="format_tiff">TIFF</string>
+    <string name="format_tiff_desc">Best for scientific analysis</string>
+
+    <!-- Settings Screen -->
+    <string name="settings">Settings</string>
+    <string name="user_information">User Information</string>
+    <string name="default_farmer_id">Default Farmer ID</string>
+    <string name="default_field_id">Default Field ID</string>
+    <string name="camera">Camera</string>
+    <string name="default_resolution">Default Resolution</string>
+    <string name="grid_overlay">Grid Overlay</string>
+    <string name="show_histogram">Show Histogram</string>
+    <string name="focus_peaking">Focus Peaking</string>
+    <string name="zebra_stripes">Zebra Stripes (Overexposure)</string>
+    <string name="zebra_threshold">Zebra Threshold</string>
+    <string name="stitching">Stitching</string>
+    <string name="overlap_guide">Overlap Guide</string>
+    <string name="overlap_recommendation">Recommended: 20–30% overlap for best stitching results</string>
+    <string name="export">Export</string>
+    <string name="default_format">Default Format</string>
+    <string name="jpeg_quality">JPEG Quality</string>
+    <string name="save_location">Save Location</string>
+    <string name="include_exif">Include EXIF Metadata</string>
+    <string name="behavior">Behavior</string>
+    <string name="vibrate_on_capture">Vibrate on Capture</string>
+    <string name="keep_screen_on">Keep Screen On</string>
+    <string name="auto_save_segments">Auto-save Segments</string>
+    <string name="storage">Storage</string>
+    <string name="clear_thumbnail_cache">Clear Thumbnail Cache</string>
+    <string name="cache_cleared">Cache cleared</string>
+    <string name="about">About</string>
+    <string name="version">Version</string>
+    <string name="build">Build</string>
+
+    <!-- Resolution Options -->
+    <string name="resolution_full">Full Resolution</string>
+    <string name="resolution_high">High (12MP)</string>
+    <string name="resolution_medium">Medium (8MP)</string>
+    <string name="resolution_low">Low (4MP)</string>
+
+    <!-- Grid Options -->
+    <string name="grid_none">None</string>
+    <string name="grid_thirds">Rule of Thirds</string>
+    <string name="grid_golden">Golden Ratio</string>
+    <string name="grid_center">Center Cross</string>
+    <string name="grid_4x4">4×4 Grid</string>
+
+    <!-- White Balance Options -->
+    <string name="wb_auto">Auto</string>
+    <string name="wb_daylight">Daylight</string>
+    <string name="wb_cloudy">Cloudy</string>
+    <string name="wb_tungsten">Tungsten</string>
+    <string name="wb_fluorescent">Fluorescent</string>
+    <string name="wb_flash">Flash</string>
+    <string name="wb_shade">Shade</string>
+    <string name="wb_custom">Custom</string>
+
+    <!-- Flash Options -->
+    <string name="flash_off">Off</string>
+    <string name="flash_on">On</string>
+    <string name="flash_auto">Auto</string>
+    <string name="flash_torch">Torch</string>
+
+    <!-- Export Location Options -->
+    <string name="location_pictures">Pictures/LeafDoc</string>
+    <string name="location_documents">Documents/LeafDoc</string>
+    <string name="location_downloads">Downloads/LeafDoc</string>
+    <string name="location_custom">Custom Location</string>
+
+    <!-- Diagnosis Status -->
+    <string name="status_pending">Pending</string>
+    <string name="status_uploading">Uploading</string>
+    <string name="status_processing">Processing</string>
+    <string name="status_completed">Analyzed</string>
+    <string name="status_failed">Failed</string>
+
+    <!-- Messages -->
+    <string name="session_started">Session started. Capture first segment.</string>
+    <string name="segment_saved">Segment %d saved. Slide leaf and capture next.</string>
+    <string name="creating_panorama">Creating panorama…</string>
+    <string name="leaf_image_created">Leaf image created successfully!</string>
+    <string name="session_deleted">Session deleted</string>
+    <string name="sessions_deleted">Sessions deleted</string>
+
+    <!-- Errors -->
+    <string name="error_no_active_session">No active session</string>
+    <string name="error_no_segments">No segments captured</string>
+    <string name="error_stitching_failed">Stitching failed</string>
+    <string name="error_analysis_failed">Analysis failed</string>
+    <string name="error_export_failed">Export failed</string>
+    <string name="error_delete_failed">Failed to delete</string>
+    <string name="error_image_not_found">Image file not found</string>
+
+    <!-- Actions -->
+    <string name="share">Share</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="close">Close</string>
+    <string name="back">Back</string>
+    <string name="gallery">Gallery</string>
+    <string name="filter">Filter</string>
+</resources>
