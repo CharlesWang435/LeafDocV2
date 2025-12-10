@@ -32,6 +32,11 @@ fun SettingsScreen(
     val storageInfo by viewModel.storageInfo.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
+    // Midrib alignment settings
+    val midribAlignmentEnabled by viewModel.midribAlignmentEnabled.collectAsState()
+    val midribSearchTolerance by viewModel.midribSearchTolerance.collectAsState()
+    val midribGuideEnabled by viewModel.midribGuideEnabled.collectAsState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -163,6 +168,42 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            // Midrib Alignment Section
+            SettingsSection(title = "Midrib Alignment") {
+                SettingsSwitch(
+                    label = "Auto-Align Midrib",
+                    description = "Automatically align leaf segments by detecting and matching the midrib (central vein)",
+                    checked = midribAlignmentEnabled,
+                    onCheckedChange = { viewModel.updateMidribAlignmentEnabled(it) },
+                    icon = Icons.Default.AutoFixHigh
+                )
+
+                if (midribAlignmentEnabled) {
+                    SettingsSlider(
+                        label = "Search Tolerance",
+                        value = midribSearchTolerance.toFloat(),
+                        valueRange = 20f..80f,
+                        valueText = "$midribSearchTolerance%",
+                        onValueChange = { viewModel.updateMidribSearchTolerance(it.toInt()) }
+                    )
+
+                    Text(
+                        text = "How much of the image height to search for the midrib. Higher values handle more vertical drift but may be slower.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+
+                SettingsSwitch(
+                    label = "Show Midrib Guide",
+                    description = "Display a horizontal guide line on the camera preview to help align the leaf midrib",
+                    checked = midribGuideEnabled,
+                    onCheckedChange = { viewModel.updateMidribGuideEnabled(it) },
+                    icon = Icons.Default.Straighten
                 )
             }
 
@@ -304,33 +345,46 @@ private fun SettingsSwitch(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    description: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(modifier = Modifier.width(16.dp))
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
         }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
+        if (description != null) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, start = if (icon != null) 40.dp else 0.dp)
+            )
+        }
     }
 }
 

@@ -42,6 +42,15 @@ class UserPreferencesManager(private val context: Context) {
         val AUTO_SAVE_SEGMENTS = booleanPreferencesKey("auto_save_segments")
         val VIBRATE_ON_CAPTURE = booleanPreferencesKey("vibrate_on_capture")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+
+        // Midrib alignment settings
+        val MIDRIB_ALIGNMENT_ENABLED = booleanPreferencesKey("midrib_alignment_enabled")
+        val MIDRIB_SEARCH_TOLERANCE = intPreferencesKey("midrib_search_tolerance")
+        val MIDRIB_GUIDE_ENABLED = booleanPreferencesKey("midrib_guide_enabled")
+        val MIDRIB_GUIDE_POSITION = floatPreferencesKey("midrib_guide_position")
+        val MIDRIB_GUIDE_THICKNESS = floatPreferencesKey("midrib_guide_thickness")
+        val MIDRIB_GUIDE_LOCKED = booleanPreferencesKey("midrib_guide_locked")
+        val CROP_RECT_LOCKED = booleanPreferencesKey("crop_rect_locked")
     }
 
     val cameraSettings: Flow<CameraSettings> = context.dataStore.data.map { preferences ->
@@ -106,6 +115,34 @@ class UserPreferencesManager(private val context: Context) {
         preferences[PreferencesKeys.KEEP_SCREEN_ON] ?: true
     }
 
+    val midribAlignmentEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_ALIGNMENT_ENABLED] ?: true
+    }
+
+    val midribSearchTolerance: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_SEARCH_TOLERANCE] ?: 50 // 50% of image height
+    }
+
+    val midribGuideEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_GUIDE_ENABLED] ?: true
+    }
+
+    val midribGuidePosition: Flow<Float> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_GUIDE_POSITION] ?: 0.5f // Center
+    }
+
+    val midribGuideThickness: Flow<Float> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_GUIDE_THICKNESS] ?: 0.05f // 5% of screen height
+    }
+
+    val midribGuideLocked: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.MIDRIB_GUIDE_LOCKED] ?: false
+    }
+
+    val cropRectLocked: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.CROP_RECT_LOCKED] ?: false
+    }
+
     suspend fun updateCameraSettings(settings: CameraSettings) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.ISO] = settings.iso
@@ -165,6 +202,48 @@ class UserPreferencesManager(private val context: Context) {
     suspend fun updateKeepScreenOn(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEEP_SCREEN_ON] = enabled
+        }
+    }
+
+    suspend fun updateMidribAlignmentEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_ALIGNMENT_ENABLED] = enabled
+        }
+    }
+
+    suspend fun updateMidribSearchTolerance(percentage: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_SEARCH_TOLERANCE] = percentage.coerceIn(20, 80)
+        }
+    }
+
+    suspend fun updateMidribGuideEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_GUIDE_ENABLED] = enabled
+        }
+    }
+
+    suspend fun updateMidribGuidePosition(position: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_GUIDE_POSITION] = position.coerceIn(0f, 1f)
+        }
+    }
+
+    suspend fun updateMidribGuideThickness(thickness: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_GUIDE_THICKNESS] = thickness.coerceIn(0.02f, 0.15f)
+        }
+    }
+
+    suspend fun updateMidribGuideLocked(locked: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIDRIB_GUIDE_LOCKED] = locked
+        }
+    }
+
+    suspend fun updateCropRectLocked(locked: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CROP_RECT_LOCKED] = locked
         }
     }
 }

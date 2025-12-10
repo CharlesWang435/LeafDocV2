@@ -15,20 +15,26 @@ import kotlin.math.max
  * 2. Each segment has a small overlap (~10%) with the previous one
  * 3. Segments are stitched left-to-right with gradient blending in overlap zones
  *
- * No complex alignment or feature matching - just simple concatenation with blending.
+ * Optionally performs midrib alignment to correct vertical drift between segments.
  */
 class SimpleStitcher {
+
+    private val midribAligner = MidribAligner()
 
     /**
      * Stitches multiple images horizontally with overlap blending.
      *
      * @param images List of cropped bitmap segments, in order from left to right (base to tip)
      * @param overlapPercent The percentage of overlap between consecutive images (0.0-1.0)
+     * @param alignMidrib Whether to auto-align images based on midrib detection
+     * @param midribSearchTolerance How much of image height to search for midrib (0.0-1.0)
      * @return StitchResult containing the stitched panorama or an error
      */
     suspend fun stitchImages(
         images: List<Bitmap>,
-        overlapPercent: Float = 0.10f
+        overlapPercent: Float = 0.10f,
+        alignMidrib: Boolean = false,
+        midribSearchTolerance: Float = 0.5f
     ): StitchResult = withContext(Dispatchers.Default) {
         if (images.isEmpty()) {
             return@withContext StitchResult.Error("No images to stitch")
@@ -41,46 +47,73 @@ class SimpleStitcher {
         }
 
         try {
-            // Calculate total width needed
-            val overlapWidth = (images.first().width * overlapPercent).toInt()
-            var totalWidth = images.first().width
-
-            for (i in 1 until images.size) {
-                // Add width minus overlap for each subsequent image
-                totalWidth += images[i].width - overlapWidth
-            }
-
-            // Use the maximum height among all images
-            val maxHeight = images.maxOf { it.height }
-
-            // Create result bitmap
-            val result = Bitmap.createBitmap(totalWidth, maxHeight, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(result)
-
-            // Draw first image (no left blend)
-            canvas.drawBitmap(images.first(), 0f, 0f, null)
-
-            var currentX = images.first().width - overlapWidth
-
-            // Draw subsequent images with blending
-            for (i in 1 until images.size) {
-                val currentImage = images[i]
-                val isLastImage = i == images.size - 1
-
-                // Blend the overlap region
-                blendAndDraw(
-                    canvas = canvas,
-                    previousImage = images[i - 1],
-                    currentImage = currentImage,
-                    xPosition = currentX,
-                    overlapWidth = overlapWidth,
-                    isLastImage = isLastImage
+            // Optionally align images based on midrib detection
+            val processedImages = if (alignMidrib) {
+                midribAligner.createAlignedBitmaps(
+                    images = images,
+                    searchTolerancePercent = midribSearchTolerance,
+                    fillColor = Color.WHITE // Use white for transmittance background
                 )
-
-                currentX += currentImage.width - overlapWidth
+            } else {
+                images.map { it.copy(Bitmap.Config.ARGB_8888, true) }
             }
 
-            StitchResult.Success(result)
+            try {
+                // Calculate total width needed
+                val overlapWidth = (processedImages.first().width * overlapPercent).toInt()
+                var totalWidth = processedImages.first().width
+
+                for (i in 1 until processedImages.size) {
+                    // Add width minus overlap for each subsequent image
+                    totalWidth += processedImages[i].width - overlapWidth
+                }
+
+                // Use the maximum height among all images
+                val maxHeight = processedImages.maxOf { it.height }
+
+                // Create result bitmap
+                val result = Bitmap.createBitmap(totalWidth, maxHeight, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(result)
+
+                // Fill with white background (for transmittance imaging)
+                canvas.drawColor(Color.WHITE)
+
+                // Draw first image (no left blend)
+                canvas.drawBitmap(processedImages.first(), 0f, 0f, null)
+
+                var currentX = processedImages.first().width - overlapWidth
+
+                // Draw subsequent images with blending
+                for (i in 1 until processedImages.size) {
+                    val currentImage = processedImages[i]
+                    val isLastImage = i == processedImages.size - 1
+
+                    // Blend the overlap region
+                    blendAndDraw(
+                        canvas = canvas,
+                        previousImage = processedImages[i - 1],
+                        currentImage = currentImage,
+                        xPosition = currentX,
+                        overlapWidth = overlapWidth,
+                        isLastImage = isLastImage
+                    )
+
+                    currentX += currentImage.width - overlapWidth
+                }
+
+                // Recycle processed images if they were created (aligned)
+                if (alignMidrib) {
+                    processedImages.forEach { it.recycle() }
+                }
+
+                StitchResult.Success(result)
+            } catch (e: Exception) {
+                // Clean up on error
+                if (alignMidrib) {
+                    processedImages.forEach { it.recycle() }
+                }
+                throw e
+            }
         } catch (e: Exception) {
             StitchResult.Error(e.message ?: "Stitching failed")
         }

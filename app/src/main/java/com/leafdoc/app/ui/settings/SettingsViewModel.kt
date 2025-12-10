@@ -41,6 +41,16 @@ class SettingsViewModel @Inject constructor(
     val keepScreenOn = preferencesManager.keepScreenOn
         .stateIn(viewModelScope, SharingStarted.Lazily, true)
 
+    // Midrib alignment settings
+    val midribAlignmentEnabled = preferencesManager.midribAlignmentEnabled
+        .stateIn(viewModelScope, SharingStarted.Lazily, true)
+
+    val midribSearchTolerance = preferencesManager.midribSearchTolerance
+        .stateIn(viewModelScope, SharingStarted.Lazily, 50)
+
+    val midribGuideEnabled = preferencesManager.midribGuideEnabled
+        .stateIn(viewModelScope, SharingStarted.Lazily, true)
+
     private val _storageInfo = MutableStateFlow<StorageInfo?>(null)
     val storageInfo: StateFlow<StorageInfo?> = _storageInfo.asStateFlow()
 
@@ -174,6 +184,25 @@ class SettingsViewModel @Inject constructor(
     fun updateKeepScreenOn(enabled: Boolean) {
         viewModelScope.launch {
             preferencesManager.updateKeepScreenOn(enabled)
+        }
+    }
+
+    // Midrib Alignment Settings
+    fun updateMidribAlignmentEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesManager.updateMidribAlignmentEnabled(enabled)
+        }
+    }
+
+    fun updateMidribSearchTolerance(tolerance: Int) {
+        viewModelScope.launch {
+            preferencesManager.updateMidribSearchTolerance(tolerance)
+        }
+    }
+
+    fun updateMidribGuideEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesManager.updateMidribGuideEnabled(enabled)
         }
     }
 

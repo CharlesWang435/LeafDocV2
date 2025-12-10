@@ -9,11 +9,18 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,22 +29,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 
 /**
  * Fullscreen zoomable and pannable image viewer dialog.
- * Supports pinch-to-zoom and drag-to-pan gestures.
+ * Supports pinch-to-zoom, drag-to-pan, and double-tap-to-zoom gestures.
  *
  * @param imagePath The path to the image to display
  * @param onDismiss Callback when the user closes the viewer
+ * @param onViewResults Optional callback to navigate to results screen
+ * @param sessionId Optional session ID for the results navigation
  */
 @Composable
 fun ZoomableImageDialog(
     imagePath: String?,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onViewResults: ((String) -> Unit)? = null,
+    sessionId: String? = null
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -59,19 +74,85 @@ fun ZoomableImageDialog(
                 )
             }
 
-            // Close button
-            IconButton(
-                onClick = onDismiss,
+            // Top controls bar
+            Row(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = Color.White
-                )
+                // Close button
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White
+                    )
+                }
+
+                // Zoom hint
+                Surface(
+                    color = Color.Black.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ZoomIn,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Pinch or double-tap to zoom",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                // Placeholder for symmetry
+                Spacer(modifier = Modifier.size(48.dp))
+            }
+
+            // Bottom button - View Results (if callback provided)
+            if (onViewResults != null && sessionId != null) {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onViewResults(sessionId)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 24.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50) // Green
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Analytics,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "View Results & Diagnosis",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp
+                    )
+                }
             }
         }
     }
@@ -79,7 +160,7 @@ fun ZoomableImageDialog(
 
 /**
  * The core zoomable and pannable image content.
- * Handles all gesture transformations.
+ * Handles all gesture transformations with improved bounds calculation.
  */
 @Composable
 private fun ZoomableImageContent(
@@ -88,13 +169,14 @@ private fun ZoomableImageContent(
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
     val state = rememberTransformableState { zoomChange, offsetChange, _ ->
         val newScale = (scale * zoomChange).coerceIn(1f, 5f)
 
-        // Calculate max offset to prevent panning beyond image bounds
-        val maxOffsetX = (newScale - 1f) * 500f // Approximate based on container
-        val maxOffsetY = (newScale - 1f) * 500f
+        // Calculate max offset based on actual container size
+        val maxOffsetX = (newScale - 1f) * containerSize.width / 2
+        val maxOffsetY = (newScale - 1f) * containerSize.height / 2
 
         scale = newScale
         offset = Offset(
@@ -106,21 +188,22 @@ private fun ZoomableImageContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onSizeChanged { containerSize = it }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = { tapOffset ->
-                        // Double tap to toggle zoom between 1x and 2.5x
+                        // Double tap to toggle zoom between 1x and 3x
                         if (scale > 1.5f) {
                             scale = 1f
                             offset = Offset.Zero
                         } else {
-                            scale = 2.5f
+                            scale = 3f
                             // Center zoom on tap location
-                            val centerX = size.width / 2
-                            val centerY = size.height / 2
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
                             offset = Offset(
-                                x = (centerX - tapOffset.x) * 0.5f,
-                                y = (centerY - tapOffset.y) * 0.5f
+                                x = (centerX - tapOffset.x) * (scale - 1) / scale,
+                                y = (centerY - tapOffset.y) * (scale - 1) / scale
                             )
                         }
                     }

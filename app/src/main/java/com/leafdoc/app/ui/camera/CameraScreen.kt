@@ -69,8 +69,21 @@ fun CameraScreen(
     val defaultFieldId by viewModel.defaultFieldId.collectAsState()
     val cropRect by viewModel.cropRect.collectAsState()
 
+    // Midrib guide state
+    val midribGuideEnabled by viewModel.midribGuideEnabled.collectAsState()
+    val midribGuidePosition by viewModel.midribGuidePosition.collectAsState()
+    val midribGuideThickness by viewModel.midribGuideThickness.collectAsState()
+    val midribGuideLocked by viewModel.midribGuideLocked.collectAsState()
+    val cropRectLocked by viewModel.cropRectLocked.collectAsState()
+    val midribAlignmentEnabled by viewModel.midribAlignmentEnabled.collectAsState()
+
+    // Pop-out panel state
+    var showLockControlsPanel by remember { mutableStateOf(false) }
+
     var cameraController by remember { mutableStateOf<ProCameraController?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    var previewWidth by remember { mutableStateOf(0) }
+    var previewHeight by remember { mutableStateOf(0) }
     var showControls by remember { mutableStateOf(false) }
     var showSessionDialog by remember { mutableStateOf(false) }
     var showProControls by remember { mutableStateOf(false) }
@@ -116,6 +129,13 @@ fun CameraScreen(
                         scaleType = PreviewView.ScaleType.FILL_CENTER
                         previewView = this
 
+                        // Track preview dimensions
+                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                            previewWidth = right - left
+                            previewHeight = bottom - top
+                            viewModel.updatePreviewDimensions(previewWidth, previewHeight)
+                        }
+
                         // Initialize camera
                         val controller = ProCameraController(ctx)
                         cameraController = controller
@@ -149,20 +169,44 @@ fun CameraScreen(
                 )
             }
 
-            // Crop Rectangle Overlay (always visible during session)
+            // Crop Rectangle Overlay (always visible)
             CropRectangleOverlay(
                 cropRect = cropRect,
                 onCropRectChanged = { viewModel.updateCropRect(it) },
+                isLocked = cropRectLocked,
                 enabled = !uiState.isProcessing,
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Top Bar
+            // Midrib Guide Line (horizontal guide for aligning the leaf midrib)
+            if (midribGuideEnabled) {
+                MidribGuideOverlay(
+                    guidePositionPercent = midribGuidePosition,
+                    guideThicknessPercent = midribGuideThickness,
+                    onPositionChanged = { viewModel.updateMidribGuidePosition(it) },
+                    onThicknessChanged = { viewModel.updateMidribGuideThickness(it) },
+                    isLocked = midribGuideLocked,
+                    isVisible = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Top Bar with pop-out trigger/panel in center
             TopBar(
                 sessionActive = uiState.sessionActive,
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
                 onGalleryClick = onNavigateToGallery,
+                showLockControlsPanel = showLockControlsPanel,
+                onToggleLockControlsPanel = { showLockControlsPanel = !showLockControlsPanel },
+                cropRectLocked = cropRectLocked,
+                midribGuideLocked = midribGuideLocked,
+                midribGuideEnabled = midribGuideEnabled,
+                midribAlignmentEnabled = midribAlignmentEnabled,
+                onToggleCropLock = { viewModel.toggleCropRectLocked() },
+                onToggleMidribLock = { viewModel.toggleMidribGuideLocked() },
+                onToggleMidribGuide = { viewModel.toggleMidribGuideEnabled() },
+                onToggleMidribAlignment = { viewModel.toggleMidribAlignment() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
@@ -181,14 +225,15 @@ fun CameraScreen(
                 )
             }
 
-            // Pro Controls Panel - positioned on right side for better leaf visibility
+            // Pro Controls Panel - compact bottom strip design
             AnimatedVisibility(
                 visible = showProControls,
-                enter = slideInHorizontally(initialOffsetX = { it }),
-                exit = slideOutHorizontally(targetOffsetX = { it }),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight(0.7f)
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 100.dp) // Above the capture button
             ) {
                 ProControlsPanel(
                     settings = cameraSettings,
@@ -199,8 +244,7 @@ fun CameraScreen(
                     onWhiteBalanceChange = { viewModel.updateWhiteBalance(it) },
                     onExposureCompensationChange = { viewModel.updateExposureCompensation(it) },
                     onFlashChange = { viewModel.updateFlashMode(it) },
-                    onClose = { showProControls = false },
-                    modifier = Modifier.fillMaxHeight()
+                    onClose = { showProControls = false }
                 )
             }
 
@@ -299,6 +343,16 @@ private fun TopBar(
     segmentCount: Int,
     onSettingsClick: () -> Unit,
     onGalleryClick: () -> Unit,
+    showLockControlsPanel: Boolean,
+    onToggleLockControlsPanel: () -> Unit,
+    cropRectLocked: Boolean,
+    midribGuideLocked: Boolean,
+    midribGuideEnabled: Boolean,
+    midribAlignmentEnabled: Boolean,
+    onToggleCropLock: () -> Unit,
+    onToggleMidribLock: () -> Unit,
+    onToggleMidribGuide: () -> Unit,
+    onToggleMidribAlignment: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -318,6 +372,7 @@ private fun TopBar(
             )
         }
 
+        // Center section: session info, pop-out trigger, or horizontal controls panel
         if (sessionActive) {
             Surface(
                 color = Color.Black.copy(alpha = 0.7f),
@@ -341,6 +396,34 @@ private fun TopBar(
                         fontWeight = FontWeight.Medium
                     )
                 }
+            }
+        } else if (showLockControlsPanel) {
+            // Horizontal controls panel (replaces the arrow when expanded)
+            HorizontalLockControlsPanel(
+                cropRectLocked = cropRectLocked,
+                midribGuideLocked = midribGuideLocked,
+                midribGuideEnabled = midribGuideEnabled,
+                midribAlignmentEnabled = midribAlignmentEnabled,
+                onToggleCropLock = onToggleCropLock,
+                onToggleMidribLock = onToggleMidribLock,
+                onToggleMidribGuide = onToggleMidribGuide,
+                onToggleMidribAlignment = onToggleMidribAlignment,
+                onClose = onToggleLockControlsPanel
+            )
+        } else {
+            // Pop-out panel trigger button (center, circular)
+            IconButton(
+                onClick = onToggleLockControlsPanel,
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Expand panel",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
             }
         }
 
@@ -741,6 +824,10 @@ private fun SessionStartDialog(
     )
 }
 
+/**
+ * Compact Pro Controls Panel - Horizontal bottom strip design
+ * Inspired by professional camera apps (Lightroom, Halide, ProCam)
+ */
 @Composable
 private fun ProControlsPanel(
     settings: CameraSettings,
@@ -754,142 +841,388 @@ private fun ProControlsPanel(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier.width(280.dp),
-        color = Color.Black.copy(alpha = 0.85f),
-        shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
+    var selectedControl by remember { mutableStateOf<ProControlType?>(null) }
+
+    Column(
+        modifier = modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState())
+        // Expandable detail area (only shows when a control is selected)
+        AnimatedVisibility(
+            visible = selectedControl != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
         ) {
-            Row(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                color = Color.Black.copy(alpha = 0.9f)
             ) {
-                Text(
-                    text = "Pro Controls",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = onClose) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color.White
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ISO Control
-            ControlRow(
-                label = "ISO",
-                value = CameraSettings.isoToString(settings.iso),
-                options = CameraSettings.ISO_VALUES.map { CameraSettings.isoToString(it) },
-                onSelect = { index ->
-                    onIsoChange(CameraSettings.ISO_VALUES[index])
-                }
-            )
-
-            // Shutter Speed Control
-            ControlRow(
-                label = "Shutter",
-                value = CameraSettings.shutterSpeedToString(settings.shutterSpeed),
-                options = CameraSettings.SHUTTER_SPEEDS.map { CameraSettings.shutterSpeedToString(it) },
-                onSelect = { index ->
-                    onShutterChange(CameraSettings.SHUTTER_SPEEDS[index])
-                }
-            )
-
-            // White Balance Control
-            ControlRow(
-                label = "WB",
-                value = settings.whiteBalance.displayName,
-                options = WhiteBalanceMode.entries.map { it.displayName },
-                onSelect = { index ->
-                    onWhiteBalanceChange(WhiteBalanceMode.entries[index])
-                }
-            )
-
-            // Flash Control
-            ControlRow(
-                label = "Flash",
-                value = settings.flashMode.displayName,
-                options = FlashMode.entries.map { it.displayName },
-                onSelect = { index ->
-                    onFlashChange(FlashMode.entries[index])
-                }
-            )
-
-            // Exposure Compensation Slider
-            if (capabilities != null && settings.iso == CameraSettings.ISO_AUTO) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Exposure: ${if (settings.exposureCompensation >= 0) "+" else ""}${"%.1f".format(settings.exposureCompensation)} EV",
-                    color = Color.White,
-                    fontSize = 14.sp
-                )
-                Slider(
-                    value = settings.exposureCompensation,
-                    onValueChange = onExposureCompensationChange,
-                    valueRange = (capabilities.exposureCompensationRange.lower * capabilities.exposureCompensationStep)..(capabilities.exposureCompensationRange.upper * capabilities.exposureCompensationStep),
-                    steps = capabilities.exposureCompensationRange.upper - capabilities.exposureCompensationRange.lower - 1,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.Green
-                    )
-                )
-            }
-
-            // Focus Distance Slider (Manual Focus)
-            if (capabilities != null && capabilities.minFocusDistance > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "Focus: ${if (settings.focusDistance == CameraSettings.FOCUS_AUTO) "Auto" else "Manual"}",
-                        color = Color.White,
-                        fontSize = 14.sp
-                    )
-                    TextButton(
-                        onClick = {
-                            onFocusChange(
-                                if (settings.focusDistance == CameraSettings.FOCUS_AUTO)
-                                    capabilities.hyperfocalDistance
-                                else
-                                    CameraSettings.FOCUS_AUTO
+                    when (selectedControl) {
+                        ProControlType.ISO -> {
+                            CompactOptionSelector(
+                                title = "ISO",
+                                options = CameraSettings.ISO_VALUES.map { CameraSettings.isoToString(it) },
+                                selectedIndex = CameraSettings.ISO_VALUES.indexOf(settings.iso).coerceAtLeast(0),
+                                onSelect = { onIsoChange(CameraSettings.ISO_VALUES[it]) }
                             )
                         }
-                    ) {
-                        Text(
-                            text = if (settings.focusDistance == CameraSettings.FOCUS_AUTO) "Manual" else "Auto",
-                            color = Color.Green
-                        )
+                        ProControlType.SHUTTER -> {
+                            CompactOptionSelector(
+                                title = "Shutter Speed",
+                                options = CameraSettings.SHUTTER_SPEEDS.map { CameraSettings.shutterSpeedToString(it) },
+                                selectedIndex = CameraSettings.SHUTTER_SPEEDS.indexOf(settings.shutterSpeed).coerceAtLeast(0),
+                                onSelect = { onShutterChange(CameraSettings.SHUTTER_SPEEDS[it]) }
+                            )
+                        }
+                        ProControlType.WB -> {
+                            CompactOptionSelector(
+                                title = "White Balance",
+                                options = WhiteBalanceMode.entries.map { it.displayName },
+                                selectedIndex = WhiteBalanceMode.entries.indexOf(settings.whiteBalance),
+                                onSelect = { onWhiteBalanceChange(WhiteBalanceMode.entries[it]) }
+                            )
+                        }
+                        ProControlType.FLASH -> {
+                            CompactOptionSelector(
+                                title = "Flash",
+                                options = FlashMode.entries.map { it.displayName },
+                                selectedIndex = FlashMode.entries.indexOf(settings.flashMode),
+                                onSelect = { onFlashChange(FlashMode.entries[it]) }
+                            )
+                        }
+                        ProControlType.EV -> {
+                            if (capabilities != null) {
+                                CompactSliderControl(
+                                    title = "Exposure",
+                                    value = settings.exposureCompensation,
+                                    valueLabel = "${if (settings.exposureCompensation >= 0) "+" else ""}${"%.1f".format(settings.exposureCompensation)} EV",
+                                    range = (capabilities.exposureCompensationRange.lower * capabilities.exposureCompensationStep)..(capabilities.exposureCompensationRange.upper * capabilities.exposureCompensationStep),
+                                    onValueChange = onExposureCompensationChange
+                                )
+                            }
+                        }
+                        ProControlType.FOCUS -> {
+                            if (capabilities != null && capabilities.minFocusDistance > 0) {
+                                CompactFocusControl(
+                                    isAuto = settings.focusDistance == CameraSettings.FOCUS_AUTO,
+                                    focusDistance = settings.focusDistance,
+                                    maxFocusDistance = capabilities.minFocusDistance,
+                                    hyperfocalDistance = capabilities.hyperfocalDistance,
+                                    onFocusChange = onFocusChange
+                                )
+                            }
+                        }
+                        null -> {}
                     }
                 }
-                if (settings.focusDistance != CameraSettings.FOCUS_AUTO) {
-                    Slider(
-                        value = settings.focusDistance,
-                        onValueChange = onFocusChange,
-                        valueRange = 0f..capabilities.minFocusDistance,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.Green
-                        )
+            }
+        }
+
+        // Main control strip
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.Black.copy(alpha = 0.85f),
+            shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Close button
+                CompactControlButton(
+                    icon = Icons.Default.Close,
+                    label = "",
+                    value = "",
+                    isSelected = false,
+                    onClick = onClose,
+                    showValue = false
+                )
+
+                // ISO
+                CompactControlButton(
+                    icon = Icons.Default.Iso,
+                    label = "ISO",
+                    value = CameraSettings.isoToString(settings.iso),
+                    isSelected = selectedControl == ProControlType.ISO,
+                    onClick = {
+                        selectedControl = if (selectedControl == ProControlType.ISO) null else ProControlType.ISO
+                    }
+                )
+
+                // Shutter
+                CompactControlButton(
+                    icon = Icons.Default.ShutterSpeed,
+                    label = "SS",
+                    value = CameraSettings.shutterSpeedToString(settings.shutterSpeed),
+                    isSelected = selectedControl == ProControlType.SHUTTER,
+                    onClick = {
+                        selectedControl = if (selectedControl == ProControlType.SHUTTER) null else ProControlType.SHUTTER
+                    }
+                )
+
+                // White Balance
+                CompactControlButton(
+                    icon = Icons.Default.WbSunny,
+                    label = "WB",
+                    value = settings.whiteBalance.shortName,
+                    isSelected = selectedControl == ProControlType.WB,
+                    onClick = {
+                        selectedControl = if (selectedControl == ProControlType.WB) null else ProControlType.WB
+                    }
+                )
+
+                // EV (only in auto mode)
+                if (settings.iso == CameraSettings.ISO_AUTO && capabilities != null) {
+                    CompactControlButton(
+                        icon = Icons.Default.Exposure,
+                        label = "EV",
+                        value = "${if (settings.exposureCompensation >= 0) "+" else ""}${"%.1f".format(settings.exposureCompensation)}",
+                        isSelected = selectedControl == ProControlType.EV,
+                        onClick = {
+                            selectedControl = if (selectedControl == ProControlType.EV) null else ProControlType.EV
+                        }
+                    )
+                }
+
+                // Focus
+                if (capabilities != null && capabilities.minFocusDistance > 0) {
+                    CompactControlButton(
+                        icon = Icons.Default.CenterFocusWeak,
+                        label = "AF",
+                        value = if (settings.focusDistance == CameraSettings.FOCUS_AUTO) "A" else "M",
+                        isSelected = selectedControl == ProControlType.FOCUS,
+                        onClick = {
+                            selectedControl = if (selectedControl == ProControlType.FOCUS) null else ProControlType.FOCUS
+                        }
+                    )
+                }
+
+                // Flash
+                CompactControlButton(
+                    icon = when (settings.flashMode) {
+                        FlashMode.OFF -> Icons.Default.FlashOff
+                        FlashMode.ON -> Icons.Default.FlashOn
+                        FlashMode.AUTO -> Icons.Default.FlashAuto
+                        FlashMode.TORCH -> Icons.Default.Highlight
+                    },
+                    label = "⚡",
+                    value = settings.flashMode.shortName,
+                    isSelected = selectedControl == ProControlType.FLASH,
+                    onClick = {
+                        selectedControl = if (selectedControl == ProControlType.FLASH) null else ProControlType.FLASH
+                    }
+                )
+            }
+        }
+    }
+}
+
+private enum class ProControlType {
+    ISO, SHUTTER, WB, EV, FOCUS, FLASH
+}
+
+@Composable
+private fun CompactControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    showValue: Boolean = true
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(if (isSelected) Color.White.copy(alpha = 0.2f) else Color.Transparent)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (isSelected) Color.Green else Color.White,
+            modifier = Modifier.size(20.dp)
+        )
+        if (showValue && value.isNotEmpty()) {
+            Text(
+                text = value,
+                color = if (isSelected) Color.Green else Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactOptionSelector(
+    title: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    Column {
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(options.size) { index ->
+                val isSelected = index == selectedIndex
+                Surface(
+                    modifier = Modifier.clickable { onSelect(index) },
+                    color = if (isSelected) Color.Green else Color.White.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = options[index],
+                        color = if (isSelected) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun CompactSliderControl(
+    title: String,
+    value: Float,
+    valueLabel: String,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = title,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
+            Text(
+                text = valueLabel,
+                color = Color.Green,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = range,
+            modifier = Modifier.height(32.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Color.Green,
+                activeTrackColor = Color.Green,
+                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+            )
+        )
+    }
+}
+
+@Composable
+private fun CompactFocusControl(
+    isAuto: Boolean,
+    focusDistance: Float,
+    maxFocusDistance: Float,
+    hyperfocalDistance: Float,
+    onFocusChange: (Float) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Focus",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    modifier = Modifier.clickable { onFocusChange(CameraSettings.FOCUS_AUTO) },
+                    color = if (isAuto) Color.Green else Color.White.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = "Auto",
+                        color = if (isAuto) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = if (isAuto) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                Surface(
+                    modifier = Modifier.clickable {
+                        if (isAuto) onFocusChange(hyperfocalDistance)
+                    },
+                    color = if (!isAuto) Color.Green else Color.White.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = "Manual",
+                        color = if (!isAuto) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = if (!isAuto) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+        if (!isAuto) {
+            Slider(
+                value = focusDistance,
+                onValueChange = onFocusChange,
+                valueRange = 0f..maxFocusDistance,
+                modifier = Modifier.height(32.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.Green,
+                    activeTrackColor = Color.Green,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                )
+            )
+        }
+    }
+}
+
+// Extension properties for short display names
+private val WhiteBalanceMode.shortName: String
+    get() = when (this) {
+        WhiteBalanceMode.AUTO -> "A"
+        WhiteBalanceMode.DAYLIGHT -> "☀"
+        WhiteBalanceMode.CLOUDY -> "☁"
+        WhiteBalanceMode.TUNGSTEN -> "💡"
+        WhiteBalanceMode.FLUORESCENT -> "F"
+        WhiteBalanceMode.FLASH -> "⚡"
+        WhiteBalanceMode.SHADE -> "🌳"
+        WhiteBalanceMode.CUSTOM -> "C"
+    }
+
+private val FlashMode.shortName: String
+    get() = when (this) {
+        FlashMode.OFF -> "Off"
+        FlashMode.ON -> "On"
+        FlashMode.AUTO -> "A"
+        FlashMode.TORCH -> "T"
+    }
 
 @Composable
 private fun ControlRow(
@@ -955,3 +1288,124 @@ private fun ControlRow(
         }
     }
 }
+
+@Composable
+private fun HorizontalLockControlsPanel(
+    cropRectLocked: Boolean,
+    midribGuideLocked: Boolean,
+    midribGuideEnabled: Boolean,
+    midribAlignmentEnabled: Boolean,
+    onToggleCropLock: () -> Unit,
+    onToggleMidribLock: () -> Unit,
+    onToggleMidribGuide: () -> Unit,
+    onToggleMidribAlignment: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.Black.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Close button (up arrow)
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Close panel",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Divider
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(28.dp)
+                    .background(Color.White.copy(alpha = 0.3f))
+            )
+
+            // Crop rectangle lock toggle
+            HorizontalToggleButton(
+                label = "Crop",
+                isActive = cropRectLocked,
+                activeIcon = Icons.Default.Lock,
+                inactiveIcon = Icons.Default.LockOpen,
+                activeColor = Color.Yellow,
+                onClick = onToggleCropLock
+            )
+
+            // Midrib guide visibility toggle
+            HorizontalToggleButton(
+                label = "Guide",
+                isActive = midribGuideEnabled,
+                activeIcon = Icons.Default.Straighten,
+                inactiveIcon = Icons.Outlined.Straighten,
+                activeColor = Color.Cyan,
+                onClick = onToggleMidribGuide
+            )
+
+            // Midrib guide lock toggle (only if guide is enabled)
+            if (midribGuideEnabled) {
+                HorizontalToggleButton(
+                    label = "Line",
+                    isActive = midribGuideLocked,
+                    activeIcon = Icons.Default.Lock,
+                    inactiveIcon = Icons.Default.LockOpen,
+                    activeColor = Color.Yellow,
+                    onClick = onToggleMidribLock
+                )
+            }
+
+            // Midrib auto-alignment toggle
+            HorizontalToggleButton(
+                label = "Align",
+                isActive = midribAlignmentEnabled,
+                activeIcon = Icons.Default.AutoFixHigh,
+                inactiveIcon = Icons.Outlined.AutoFixOff,
+                activeColor = Color.Cyan,
+                onClick = onToggleMidribAlignment
+            )
+        }
+    }
+}
+
+@Composable
+private fun HorizontalToggleButton(
+    label: String,
+    isActive: Boolean,
+    activeIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    inactiveIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    activeColor: Color,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = if (isActive) activeIcon else inactiveIcon,
+            contentDescription = "$label toggle",
+            tint = if (isActive) activeColor else Color.Gray,
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            text = label,
+            color = if (isActive) activeColor else Color.Gray,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
