@@ -152,13 +152,14 @@ fun GalleryScreen(
                         onClick = {
                             if (isSelectionMode) {
                                 viewModel.toggleSessionSelection(session.id)
-                            } else {
-                                onNavigateToSession(session.id)
                             }
+                            // When not in selection mode, tapping the image opens preview
+                            // The onNavigateToSession is now triggered from the preview dialog
                         },
                         onLongClick = {
                             viewModel.toggleSessionSelection(session.id)
-                        }
+                        },
+                        onNavigateToResults = onNavigateToSession
                     )
                 }
             }
@@ -210,7 +211,8 @@ private fun SessionCard(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    onNavigateToResults: (String) -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
     var showZoomDialog by remember { mutableStateOf(false) }
@@ -359,11 +361,13 @@ private fun SessionCard(
         }
     }
 
-    // Zoom dialog
+    // Zoom dialog with "View Results" button
     if (showZoomDialog && session.stitchedImagePath != null) {
         ZoomableImageDialog(
             imagePath = session.stitchedImagePath,
-            onDismiss = { showZoomDialog = false }
+            onDismiss = { showZoomDialog = false },
+            onViewResults = onNavigateToResults,
+            sessionId = session.id
         )
     }
 }

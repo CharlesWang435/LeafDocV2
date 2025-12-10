@@ -15,7 +15,9 @@
       "Bash(powershell.exe -Command \"where.exe gradle 2>&1\")",
       "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar'' -OutFile ''C:\\Users\\wangc\\Downloads\\LeafDocV2\\gradle\\wrapper\\gradle-wrapper.jar''\")",
       "Bash(cmd /c \"cd /d c:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug 2>&1\")",
-      "Bash(cmd /c \"c:\\Users\\wangc\\Downloads\\LeafDocV2\\gradlew.bat -p c:\\Users\\wangc\\Downloads\\LeafDocV2 assembleDebug\")"
+      "Bash(cmd /c \"c:\\Users\\wangc\\Downloads\\LeafDocV2\\gradlew.bat -p c:\\Users\\wangc\\Downloads\\LeafDocV2 assembleDebug\")",
+      "Bash(cmd /c \"cd /d C:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug --no-daemon 2>&1\")",
+      "Bash(powershell.exe -Command \"Set-Location ''C:\\Users\\wangc\\Downloads\\LeafDocV2''; .\\gradlew.bat assembleDebug 2>&1 | Select-Object -First 100\")"
     ],
     "deny": [],
     "ask": []
