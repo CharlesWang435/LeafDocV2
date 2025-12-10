@@ -91,7 +91,7 @@ class UserPreferencesManager(private val context: Context) {
     }
 
     val overlapGuidePercentage: Flow<Int> = context.dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.OVERLAP_GUIDE_PERCENTAGE] ?: 25
+        preferences[PreferencesKeys.OVERLAP_GUIDE_PERCENTAGE] ?: 10
     }
 
     val autoSaveSegments: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -146,7 +146,7 @@ class UserPreferencesManager(private val context: Context) {
 
     suspend fun updateOverlapGuidePercentage(percentage: Int) {
         context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.OVERLAP_GUIDE_PERCENTAGE] = percentage.coerceIn(10, 50)
+            preferences[PreferencesKeys.OVERLAP_GUIDE_PERCENTAGE] = percentage.coerceIn(5, 25)
         }
     }
 

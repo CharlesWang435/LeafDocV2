@@ -30,7 +30,7 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Lazily, "")
 
     val overlapPercentage = preferencesManager.overlapGuidePercentage
-        .stateIn(viewModelScope, SharingStarted.Lazily, 25)
+        .stateIn(viewModelScope, SharingStarted.Lazily, 10)
 
     val autoSaveSegments = preferencesManager.autoSaveSegments
         .stateIn(viewModelScope, SharingStarted.Lazily, true)
