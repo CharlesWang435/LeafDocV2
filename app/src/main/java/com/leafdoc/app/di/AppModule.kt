@@ -5,7 +5,7 @@ import com.google.gson.Gson
 import com.leafdoc.app.data.local.LeafSegmentDao
 import com.leafdoc.app.data.local.LeafSessionDao
 import com.leafdoc.app.data.preferences.UserPreferencesManager
-import com.leafdoc.app.data.remote.DiagnosisApiService
+import com.leafdoc.app.data.remote.GeminiAiService
 import com.leafdoc.app.data.repository.DiagnosisRepository
 import com.leafdoc.app.data.repository.LeafSessionRepository
 import com.leafdoc.app.data.repository.ImageRepository
@@ -45,11 +45,11 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDiagnosisRepository(
-        apiService: DiagnosisApiService,
+        geminiAiService: GeminiAiService,
         sessionDao: LeafSessionDao,
         gson: Gson
     ): DiagnosisRepository {
-        return DiagnosisRepository(apiService, sessionDao, gson)
+        return DiagnosisRepository(geminiAiService, sessionDao, gson)
     }
 
     @Provides

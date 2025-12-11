@@ -1,23 +1,21 @@
 package com.leafdoc.app.data.repository
 
 import android.graphics.Bitmap
-import android.util.Base64
+import android.graphics.BitmapFactory
 import com.google.gson.Gson
 import com.leafdoc.app.data.local.LeafSessionDao
 import com.leafdoc.app.data.model.*
-import com.leafdoc.app.data.remote.DiagnosisApiService
-import com.leafdoc.app.data.remote.PlantIdRequest
-import com.leafdoc.app.data.remote.PlantIdResponse
+import com.leafdoc.app.data.remote.GeminiAiService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
+import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class DiagnosisRepository @Inject constructor(
-    private val apiService: DiagnosisApiService,
+    private val geminiAiService: GeminiAiService,
     private val sessionDao: LeafSessionDao,
     private val gson: Gson
 ) {
@@ -31,47 +29,52 @@ class DiagnosisRepository @Inject constructor(
             // Update status to uploading
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.UPLOADING, null, null)
 
-            // Read and encode image
+            // Read image file
             val imageFile = File(imagePath)
             if (!imageFile.exists()) {
                 sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, "Image file not found", null)
                 return@withContext Result.failure(Exception("Image file not found"))
             }
 
-            val base64Image = encodeImageToBase64(imageFile)
+            // Load and resize bitmap if needed
+            val bitmap = loadAndResizeBitmap(imageFile)
+            if (bitmap == null) {
+                sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, "Failed to load image", null)
+                return@withContext Result.failure(Exception("Failed to load image"))
+            }
 
             // Update status to processing
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.PROCESSING, null, null)
 
-            // Make API call
-            val request = PlantIdRequest(
-                images = listOf("data:image/jpeg;base64,$base64Image"),
+            // Analyze with Gemini
+            val result = geminiAiService.analyzeLeafImage(
+                sessionId = sessionId,
+                bitmap = bitmap,
                 latitude = latitude,
-                longitude = longitude,
-                health = "all"
+                longitude = longitude
             )
 
-            val response = apiService.analyzeLeafHealthBase64(request)
+            bitmap.recycle()
 
-            if (response.isSuccessful && response.body() != null) {
-                val plantIdResponse = response.body()!!
-                val diagnosis = parseDiagnosisResponse(sessionId, plantIdResponse)
-
-                // Update database with results
-                sessionDao.updateDiagnosis(
-                    sessionId = sessionId,
-                    status = DiagnosisStatus.COMPLETED,
-                    result = serializeDiagnosis(diagnosis),
-                    confidence = diagnosis.confidence / 100f
-                )
-
-                Result.success(diagnosis)
-            } else {
-                val errorMsg = response.errorBody()?.string() ?: "Unknown error"
-                sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, errorMsg, null)
-                Result.failure(Exception("API error: ${response.code()} - $errorMsg"))
-            }
+            result.fold(
+                onSuccess = { diagnosis ->
+                    // Update database with results
+                    sessionDao.updateDiagnosis(
+                        sessionId = sessionId,
+                        status = DiagnosisStatus.COMPLETED,
+                        result = serializeDiagnosis(diagnosis),
+                        confidence = diagnosis.confidence / 100f
+                    )
+                    Result.success(diagnosis)
+                },
+                onFailure = { error ->
+                    Timber.e(error, "Gemini analysis failed")
+                    sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, error.message, null)
+                    Result.failure(error)
+                }
+            )
         } catch (e: Exception) {
+            Timber.e(e, "Error in analyzeLeaf")
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, e.message, null)
             Result.failure(e)
         }
@@ -86,83 +89,94 @@ class DiagnosisRepository @Inject constructor(
         try {
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.UPLOADING, null, null)
 
-            val base64Image = encodeBitmapToBase64(bitmap)
+            // Resize bitmap if needed
+            val resizedBitmap = resizeBitmapIfNeeded(bitmap)
 
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.PROCESSING, null, null)
 
-            val request = PlantIdRequest(
-                images = listOf("data:image/jpeg;base64,$base64Image"),
+            val result = geminiAiService.analyzeLeafImage(
+                sessionId = sessionId,
+                bitmap = resizedBitmap,
                 latitude = latitude,
-                longitude = longitude,
-                health = "all"
+                longitude = longitude
             )
 
-            val response = apiService.analyzeLeafHealthBase64(request)
-
-            if (response.isSuccessful && response.body() != null) {
-                val plantIdResponse = response.body()!!
-                val diagnosis = parseDiagnosisResponse(sessionId, plantIdResponse)
-
-                sessionDao.updateDiagnosis(
-                    sessionId = sessionId,
-                    status = DiagnosisStatus.COMPLETED,
-                    result = serializeDiagnosis(diagnosis),
-                    confidence = diagnosis.confidence / 100f
-                )
-
-                Result.success(diagnosis)
-            } else {
-                val errorMsg = response.errorBody()?.string() ?: "Unknown error"
-                sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, errorMsg, null)
-                Result.failure(Exception("API error: ${response.code()} - $errorMsg"))
+            if (resizedBitmap != bitmap) {
+                resizedBitmap.recycle()
             }
+
+            result.fold(
+                onSuccess = { diagnosis ->
+                    sessionDao.updateDiagnosis(
+                        sessionId = sessionId,
+                        status = DiagnosisStatus.COMPLETED,
+                        result = serializeDiagnosis(diagnosis),
+                        confidence = diagnosis.confidence / 100f
+                    )
+                    Result.success(diagnosis)
+                },
+                onFailure = { error ->
+                    Timber.e(error, "Gemini analysis failed")
+                    sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, error.message, null)
+                    Result.failure(error)
+                }
+            )
         } catch (e: Exception) {
+            Timber.e(e, "Error in analyzeLeafFromBitmap")
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, e.message, null)
             Result.failure(e)
         }
     }
 
-    private fun encodeImageToBase64(file: File): String {
-        // Load and resize image if needed (Plant.id limit: 25 megapixels)
-        val options = android.graphics.BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)
-
-        val maxPixels = 25_000_000 // 25 megapixels
-        val currentPixels = options.outWidth.toLong() * options.outHeight.toLong()
-
-        if (currentPixels > maxPixels) {
-            // Calculate scale factor to fit within limit
-            val scale = kotlin.math.sqrt(maxPixels.toDouble() / currentPixels.toDouble())
-            val newWidth = (options.outWidth * scale).toInt()
-            val newHeight = (options.outHeight * scale).toInt()
-
-            // Load scaled bitmap
-            val loadOptions = android.graphics.BitmapFactory.Options().apply {
-                inSampleSize = calculateInSampleSize(options, newWidth, newHeight)
+    private fun loadAndResizeBitmap(file: File): Bitmap? {
+        return try {
+            // First, get dimensions without loading full bitmap
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
-            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath, loadOptions)
+            BitmapFactory.decodeFile(file.absolutePath, options)
 
-            // Scale to exact dimensions if needed
-            val scaledBitmap = if (bitmap.width > newWidth || bitmap.height > newHeight) {
-                Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true).also {
-                    if (it != bitmap) bitmap.recycle()
-                }
-            } else {
-                bitmap
+            // Calculate sample size to stay under max pixels
+            val maxPixels = 4_000_000 // 4 megapixels max for Gemini
+            val currentPixels = options.outWidth.toLong() * options.outHeight.toLong()
+
+            val loadOptions = BitmapFactory.Options()
+            if (currentPixels > maxPixels) {
+                val scale = kotlin.math.sqrt(maxPixels.toDouble() / currentPixels.toDouble())
+                val targetWidth = (options.outWidth * scale).toInt()
+                val targetHeight = (options.outHeight * scale).toInt()
+                loadOptions.inSampleSize = calculateInSampleSize(options, targetWidth, targetHeight)
             }
 
-            return encodeBitmapToBase64(scaledBitmap).also {
-                scaledBitmap.recycle()
-            }
-        } else {
-            val bytes = file.readBytes()
-            return Base64.encodeToString(bytes, Base64.NO_WRAP)
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath, loadOptions)
+
+            // Further resize if still too large
+            resizeBitmapIfNeeded(bitmap)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load bitmap from file")
+            null
         }
     }
 
-    private fun calculateInSampleSize(options: android.graphics.BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+    private fun resizeBitmapIfNeeded(bitmap: Bitmap): Bitmap {
+        val maxPixels = 4_000_000 // 4 megapixels max for Gemini
+        val currentPixels = bitmap.width.toLong() * bitmap.height.toLong()
+
+        return if (currentPixels > maxPixels) {
+            val scale = kotlin.math.sqrt(maxPixels.toDouble() / currentPixels.toDouble())
+            val newWidth = (bitmap.width * scale).toInt()
+            val newHeight = (bitmap.height * scale).toInt()
+            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        } else {
+            bitmap
+        }
+    }
+
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
         val (height, width) = options.outHeight to options.outWidth
         var inSampleSize = 1
 
@@ -177,78 +191,6 @@ class DiagnosisRepository @Inject constructor(
         return inSampleSize
     }
 
-    private fun encodeBitmapToBase64(bitmap: Bitmap): String {
-        // Check if bitmap needs resizing for API
-        val maxPixels = 25_000_000
-        val currentPixels = bitmap.width.toLong() * bitmap.height.toLong()
-
-        val bitmapToEncode = if (currentPixels > maxPixels) {
-            val scale = kotlin.math.sqrt(maxPixels.toDouble() / currentPixels.toDouble())
-            val newWidth = (bitmap.width * scale).toInt()
-            val newHeight = (bitmap.height * scale).toInt()
-            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-        } else {
-            bitmap
-        }
-
-        val outputStream = ByteArrayOutputStream()
-        bitmapToEncode.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
-        val bytes = outputStream.toByteArray()
-
-        if (bitmapToEncode != bitmap) {
-            bitmapToEncode.recycle()
-        }
-
-        return Base64.encodeToString(bytes, Base64.NO_WRAP)
-    }
-
-    private fun parseDiagnosisResponse(sessionId: String, response: PlantIdResponse): DiagnosisDisplay {
-        val result = response.result
-        val isHealthy = result?.is_healthy?.binary ?: true
-        val healthProbability = result?.is_healthy?.probability ?: 1f
-
-        val diseases = result?.disease?.suggestions?.map { suggestion ->
-            DiseaseInfo(
-                name = suggestion.name ?: "Unknown",
-                commonName = suggestion.details?.local_name ?: suggestion.details?.common_names?.firstOrNull(),
-                probability = ((suggestion.probability ?: 0f) * 100).toInt(),
-                description = suggestion.details?.description,
-                treatments = buildList {
-                    suggestion.details?.treatment?.chemical?.let { addAll(it) }
-                    suggestion.details?.treatment?.biological?.let { addAll(it) }
-                    suggestion.details?.treatment?.prevention?.let { addAll(it) }
-                },
-                severity = when {
-                    (suggestion.probability ?: 0f) > 0.7f -> DiseaseSeverity.SEVERE
-                    (suggestion.probability ?: 0f) > 0.5f -> DiseaseSeverity.HIGH
-                    (suggestion.probability ?: 0f) > 0.3f -> DiseaseSeverity.MODERATE
-                    else -> DiseaseSeverity.LOW
-                }
-            )
-        } ?: emptyList()
-
-        val suggestions = buildList {
-            if (!isHealthy && diseases.isNotEmpty()) {
-                add("Primary concern: ${diseases.first().name}")
-                diseases.firstOrNull()?.treatments?.take(3)?.let { addAll(it) }
-            }
-            if (isHealthy) {
-                add("The leaf appears healthy. Continue regular monitoring.")
-            }
-        }
-
-        return DiagnosisDisplay(
-            sessionId = sessionId,
-            isHealthy = isHealthy,
-            healthScore = (healthProbability * 100).toInt(),
-            primaryDiagnosis = if (!isHealthy) diseases.firstOrNull()?.name else "Healthy",
-            confidence = (healthProbability * 100).toInt(),
-            diseases = diseases.sortedByDescending { it.probability },
-            suggestions = suggestions,
-            analyzedAt = System.currentTimeMillis()
-        )
-    }
-
     private fun serializeDiagnosis(diagnosis: DiagnosisDisplay): String {
         return gson.toJson(diagnosis)
     }
@@ -259,11 +201,12 @@ class DiagnosisRepository @Inject constructor(
         return try {
             gson.fromJson(json, DiagnosisDisplay::class.java)
         } catch (e: Exception) {
-            // Fallback for legacy format (manual JSON)
+            Timber.w(e, "Failed to parse saved diagnosis JSON")
+            // Fallback for legacy format
             try {
-                val isHealthy = json.contains("\"isHealthy\":true")
-                val healthScore = Regex("\"healthScore\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                val primaryDiagnosis = Regex("\"primaryDiagnosis\":\"([^\"]+)\"").find(json)?.groupValues?.get(1)
+                val isHealthy = json.contains("\"isHealthy\":true") || json.contains("\"is_healthy\":true")
+                val healthScore = Regex("\"health[Ss]core\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                val primaryDiagnosis = Regex("\"primary[Dd]iagnosis\":\"([^\"]+)\"").find(json)?.groupValues?.get(1)
                 val confidence = Regex("\"confidence\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
 
                 DiagnosisDisplay(
@@ -274,9 +217,11 @@ class DiagnosisRepository @Inject constructor(
                     confidence = confidence,
                     diseases = emptyList(),
                     suggestions = emptyList(),
+                    leafDescription = null,
                     analyzedAt = System.currentTimeMillis()
                 )
             } catch (e: Exception) {
+                Timber.e(e, "Failed to parse legacy diagnosis format")
                 null
             }
         }

@@ -17,7 +17,9 @@
       "Bash(cmd /c \"cd /d c:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug 2>&1\")",
       "Bash(cmd /c \"c:\\Users\\wangc\\Downloads\\LeafDocV2\\gradlew.bat -p c:\\Users\\wangc\\Downloads\\LeafDocV2 assembleDebug\")",
       "Bash(cmd /c \"cd /d C:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug --no-daemon 2>&1\")",
-      "Bash(powershell.exe -Command \"Set-Location ''C:\\Users\\wangc\\Downloads\\LeafDocV2''; .\\gradlew.bat assembleDebug 2>&1 | Select-Object -First 100\")"
+      "Bash(powershell.exe -Command \"Set-Location ''C:\\Users\\wangc\\Downloads\\LeafDocV2''; .\\gradlew.bat assembleDebug 2>&1 | Select-Object -First 100\")",
+      "Bash(del \"C:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\java\\com\\leafdoc\\app\\data\\remote\\DiagnosisApiService.kt\")",
+      "Bash(cmd /c \"del C:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\java\\com\\leafdoc\\app\\data\\remote\\DiagnosisApiService.kt\")"
     ],
     "deny": [],
     "ask": []

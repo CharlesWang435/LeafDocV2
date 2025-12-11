@@ -40,7 +40,7 @@ com.leafdoc.app/
 ├── data/
 │   ├── model/       # Room entities and data classes
 │   ├── local/       # Room database, DAOs
-│   ├── remote/      # Retrofit API service (Plant.id)
+│   ├── remote/      # GeminiAiService for AI diagnosis
 │   ├── repository/  # Data access layer
 │   └── preferences/ # DataStore preferences
 ├── di/              # Hilt dependency injection modules
@@ -60,7 +60,9 @@ com.leafdoc.app/
 
 2. **Stitching Flow**: `CameraViewModel.finishSession()` → `SimpleStitcher.stitchImages()` → (optional) `MidribAligner` aligns segments vertically → left-to-right concatenation with gradient blending → saves panorama
 
-3. **Diagnosis Flow**: `ResultsViewModel.analyzeDiagnosis()` → `DiagnosisRepository` → `DiagnosisApiService` (Plant.id API) → parses response → updates Room
+3. **Diagnosis Flow**: `ResultsViewModel.analyzeDiagnosis()` → `DiagnosisRepository` → `GeminiAiService` (Google Gemini API) → parses response → updates Room
+
+4. **Viewing Flow**: `GalleryScreen` (grid view) → tap image → `ZoomableImageDialog` (fullscreen preview with pinch-to-zoom) → "View Results & Diagnosis" button → `ResultsScreen` (diagnosis details, export options)
 
 ### Critical Components
 
@@ -82,20 +84,48 @@ Two Room entities with a one-to-many relationship:
 - `LeafSession`: Captures metadata (farmer ID, field ID, GPS, diagnosis status, stitched image path)
 - `LeafSegment`: Individual captured frames with camera EXIF data, linked to session via `sessionId`
 
+### DiagnosisDisplay Model
+
+Key fields for displaying AI analysis results:
+- `isHealthy`: Boolean health assessment
+- `healthScore`: Estimated health indicator (0-100) - not a definitive diagnosis
+- `leafDescription`: Detailed AI-generated visual description of the leaf (color, lesions, midrib condition, tissue health)
+- `primaryDiagnosis`: Main disease name or "Healthy"
+- `confidence`: Analysis confidence percentage (0-100)
+- `diseases`: List of `DiseaseInfo` with name, probability, severity, treatments
+- `suggestions`: Actionable recommendations
+
 ### DI Modules
 
 - `DatabaseModule`: Provides Room database and DAOs (singleton)
-- `NetworkModule`: Provides OkHttp client with API key interceptor and Retrofit
+- `NetworkModule`: Provides Gson for JSON serialization
 - `AppModule`: Provides repositories, preferences manager, location manager
 
 ## Configuration
 
-The Plant.id API key is loaded from `local.properties` (not committed to source control):
+The Gemini API key is loaded from `local.properties` (not committed to source control):
 ```properties
-PLANT_ID_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_api_key_here
 ```
 
-Copy `local.properties.example` to `local.properties` and add your key. The build script in `app/build.gradle.kts` reads this file automatically.
+Get your API key from [Google AI Studio](https://aistudio.google.com/apikey). Copy `local.properties.example` to `local.properties` and add your key. The build script in `app/build.gradle.kts` reads this file automatically.
+
+## AI Diagnosis
+
+The `GeminiAiService` uses Gemini 2.5 Flash to analyze corn leaf images. The response includes:
+- `leafDescription`: Detailed visual description of the leaf (color, lesions, midrib condition, surface texture, etc.)
+- `healthScore`: Estimated health indicator (0-100) - presented as an estimate, not a definitive diagnosis
+- `diseases`: List of potential diseases with probability, severity, and treatments
+- `suggestions`: Actionable recommendations
+
+The prompt is specialized for corn diseases including:
+- Northern Corn Leaf Blight (Exserohilum turcicum)
+- Gray Leaf Spot (Cercospora zeae-maydis)
+- Southern Corn Leaf Blight (Cochliobolus heterostrophus)
+- Common Rust (Puccinia sorghi)
+- Anthracnose (Colletotrichum graminicola)
+- Goss's Wilt (Clavibacter michiganensis)
+- Eyespot, Holcus Spot, Tar Spot, Diplodia Leaf Streak, Physoderma Brown Spot
 
 ## Logging
 
@@ -110,7 +140,8 @@ Timber.e(exception, "Error occurred")
 
 - Kotlin 2.0.21, Compose BOM 2024.11.00
 - CameraX 1.4.0 with Camera2 interop (`@ExperimentalCamera2Interop`)
-- Room 2.6.1, Hilt 2.52, Retrofit 2.11.0, Timber 5.0.1
+- Room 2.6.1, Hilt 2.52, Timber 5.0.1
+- Google Generative AI SDK 0.9.0 (Gemini 2.5 Flash for disease diagnosis)
 - Target SDK 35, Min SDK 26
 - Gradle 8.9
 

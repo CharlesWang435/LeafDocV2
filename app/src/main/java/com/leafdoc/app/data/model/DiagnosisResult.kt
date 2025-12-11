@@ -33,11 +33,12 @@ data class DiseaseDetection(
 data class DiagnosisDisplay(
     val sessionId: String,
     val isHealthy: Boolean,
-    val healthScore: Int,  // 0-100
+    val healthScore: Int,  // 0-100, estimated score - not a definitive indicator
     val primaryDiagnosis: String?,
     val confidence: Int,  // 0-100
     val diseases: List<DiseaseInfo>,
     val suggestions: List<String>,
+    val leafDescription: String?,  // Detailed description of the leaf's visual characteristics
     val analyzedAt: Long
 )
 

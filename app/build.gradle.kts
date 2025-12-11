@@ -30,11 +30,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // API Key loaded from local.properties for security
-        // Add PLANT_ID_API_KEY=your_key_here to local.properties
+        // Add GEMINI_API_KEY=your_key_here to local.properties
         buildConfigField(
             "String",
-            "PLANT_ID_API_KEY",
-            "\"${localProperties.getProperty("PLANT_ID_API_KEY", "")}\""
+            "GEMINI_API_KEY",
+            "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
         )
     }
 
@@ -129,6 +129,9 @@ dependencies {
 
     // Logging
     implementation(libs.timber)
+
+    // Google Generative AI (Gemini)
+    implementation(libs.generativeai)
 
     // Testing
     testImplementation(libs.junit)

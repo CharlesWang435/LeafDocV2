@@ -135,11 +135,14 @@ fun ZoomableImageDialog(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
-                        .padding(bottom = 24.dp),
+                        .padding(bottom = 80.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF4CAF50) // Green
                     ),
-                    shape = RoundedCornerShape(24.dp)
+                    shape = RoundedCornerShape(24.dp),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 8.dp
+                    )
                 ) {
                     Icon(
                         imageVector = Icons.Default.Analytics,
