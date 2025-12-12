@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.leafdoc.app.data.model.*
+import com.leafdoc.app.ui.camera.ManualAlignmentScreen
 import com.leafdoc.app.ui.components.ClickableZoomableImage
 import java.text.SimpleDateFormat
 import java.util.*
@@ -41,8 +42,14 @@ fun ResultsScreen(
     val exportSettings by viewModel.exportSettings.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
+    // Alignment editing state
+    val showAlignmentScreen by viewModel.showAlignmentScreen.collectAsState()
+    val alignmentBitmaps by viewModel.alignmentBitmaps.collectAsState()
+    val overlapPercentage by viewModel.overlapPercentage.collectAsState()
+
     var showExportDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showReanalyzeDialog by remember { mutableStateOf(false) }
 
     // Handle session deletion
     LaunchedEffect(uiState.sessionDeleted) {
@@ -114,6 +121,20 @@ fun ResultsScreen(
                         .padding(16.dp)
                 )
 
+                // Edit Alignment Card (only show if multiple segments)
+                if (segments.size > 1) {
+                    EditAlignmentCard(
+                        segmentCount = segments.size,
+                        isLoading = uiState.isLoading,
+                        onEditAlignment = { viewModel.prepareForAlignment() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 // Session Info
                 SessionInfoCard(
                     session = session!!,
@@ -130,6 +151,7 @@ fun ResultsScreen(
                     diagnosis = diagnosis,
                     isAnalyzing = uiState.isAnalyzing,
                     onAnalyze = { viewModel.analyzeDiagnosis() },
+                    onReanalyze = { showReanalyzeDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -189,6 +211,31 @@ fun ResultsScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Reanalyze Dialog
+    if (showReanalyzeDialog) {
+        ReanalyzeDialog(
+            availableProviders = viewModel.availableProviders,
+            availablePrompts = viewModel.availablePrompts,
+            onDismiss = { showReanalyzeDialog = false },
+            onReanalyze = { provider, promptId ->
+                viewModel.reanalyzeDiagnosis(provider, promptId)
+                showReanalyzeDialog = false
+            }
+        )
+    }
+
+    // Manual Alignment Screen
+    if (showAlignmentScreen && alignmentBitmaps.isNotEmpty()) {
+        ManualAlignmentScreen(
+            segments = alignmentBitmaps,
+            overlapPercent = overlapPercentage / 100f,
+            onAutoAlign = { viewModel.getAutoAlignOffsets() },
+            onGeneratePreview = { offsets -> viewModel.generatePreview(offsets) },
+            onConfirm = { offsets -> viewModel.confirmAlignment(offsets) },
+            onDismiss = { viewModel.cancelAlignment() }
         )
     }
 
@@ -334,6 +381,7 @@ private fun DiagnosisCard(
     diagnosis: DiagnosisDisplay?,
     isAnalyzing: Boolean,
     onAnalyze: () -> Unit,
+    onReanalyze: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
@@ -469,6 +517,27 @@ private fun DiagnosisCard(
                             Text(text = "•", modifier = Modifier.padding(end = 8.dp))
                             Text(text = suggestion, fontSize = 14.sp)
                         }
+                    }
+                }
+
+                // Reanalyze button
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onReanalyze,
+                    enabled = !isAnalyzing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isAnalyzing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Analyzing...")
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Reanalyze with Different Model")
                     }
                 }
             } else if (session.diagnosisStatus == DiagnosisStatus.PENDING) {
@@ -694,6 +763,217 @@ private fun ExportDialog(
         confirmButton = {
             Button(onClick = { onExport(selectedFormat) }) {
                 Text("Export")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun EditAlignmentCard(
+    segmentCount: Int,
+    isLoading: Boolean,
+    onEditAlignment: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Edit Alignment",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = "Adjust Y position of $segmentCount segments",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Button(
+                onClick = onEditAlignment,
+                enabled = !isLoading,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = if (isLoading) "Loading..." else "Adjust")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReanalyzeDialog(
+    availableProviders: List<Pair<AiProviderType, Boolean>>,
+    availablePrompts: List<PromptTemplateInfo>,
+    onDismiss: () -> Unit,
+    onReanalyze: (AiProviderType, String) -> Unit
+) {
+    var selectedProvider by remember { mutableStateOf(availableProviders.firstOrNull { it.second }?.first ?: AiProviderType.GEMINI) }
+    var selectedPromptId by remember { mutableStateOf(availablePrompts.firstOrNull()?.id ?: "standard_analysis") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reanalyze with AI") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                // AI Model Selection
+                Text(
+                    text = "Select AI Model",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                availableProviders.forEach { (provider, isConfigured) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedProvider == provider,
+                            onClick = { if (isConfigured) selectedProvider = provider },
+                            enabled = isConfigured
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = provider.displayName,
+                                    color = if (isConfigured)
+                                        MaterialTheme.colorScheme.onSurface
+                                    else
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                                if (!isConfigured) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Not configured",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = provider.description,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                    alpha = if (isConfigured) 1f else 0.5f
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Prompt Template Selection
+                Text(
+                    text = "Select Analysis Type",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                availablePrompts.forEach { prompt ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = selectedPromptId == prompt.id,
+                            onClick = { selectedPromptId = prompt.id }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = prompt.displayName)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = when (prompt.detailLevel) {
+                                        DetailLevel.BASIC -> MaterialTheme.colorScheme.tertiaryContainer
+                                        DetailLevel.MODERATE -> MaterialTheme.colorScheme.secondaryContainer
+                                        DetailLevel.COMPREHENSIVE -> MaterialTheme.colorScheme.primaryContainer
+                                    },
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = when (prompt.estimatedDuration) {
+                                            PromptDuration.QUICK -> "~5s"
+                                            PromptDuration.STANDARD -> "~15s"
+                                            PromptDuration.DETAILED -> "~30s"
+                                        },
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = prompt.description,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onReanalyze(selectedProvider, selectedPromptId) },
+                enabled = availableProviders.any { it.first == selectedProvider && it.second }
+            ) {
+                Icon(
+                    Icons.Default.Science,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Analyze")
             }
         },
         dismissButton = {

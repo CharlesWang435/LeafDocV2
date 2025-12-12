@@ -19,7 +19,13 @@
       "Bash(cmd /c \"cd /d C:\\Users\\wangc\\Downloads\\LeafDocV2 && gradlew.bat assembleDebug --no-daemon 2>&1\")",
       "Bash(powershell.exe -Command \"Set-Location ''C:\\Users\\wangc\\Downloads\\LeafDocV2''; .\\gradlew.bat assembleDebug 2>&1 | Select-Object -First 100\")",
       "Bash(del \"C:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\java\\com\\leafdoc\\app\\data\\remote\\DiagnosisApiService.kt\")",
-      "Bash(cmd /c \"del C:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\java\\com\\leafdoc\\app\\data\\remote\\DiagnosisApiService.kt\")"
+      "Bash(cmd /c \"del C:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\java\\com\\leafdoc\\app\\data\\remote\\DiagnosisApiService.kt\")",
+      "Bash(powershell.exe -Command:*)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -Command \"\nAdd-Type -AssemblyName System.Drawing\n\n$sourcePath = ''c:\\Users\\wangc\\Downloads\\LeafDocV2\\app icon\\LeafDocV2 icon.jpeg''\n$resDir = ''c:\\Users\\wangc\\Downloads\\LeafDocV2\\app\\src\\main\\res''\n\n$sizes = @{\n    ''mipmap-mdpi'' = 48\n    ''mipmap-hdpi'' = 72\n    ''mipmap-xhdpi'' = 96\n    ''mipmap-xxhdpi'' = 144\n    ''mipmap-xxxhdpi'' = 192\n}\n\n$source = [System.Drawing.Image]::FromFile($sourcePath)\nWrite-Host ''Source image loaded:'' $source.Width ''x'' $source.Height\n\nforeach ($folder in $sizes.Keys) {\n    $size = $sizes[$folder]\n    $outputDir = Join-Path $resDir $folder\n\n    if (-not (Test-Path $outputDir)) {\n        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null\n    }\n\n    $bitmap = New-Object System.Drawing.Bitmap($size, $size)\n    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)\n    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic\n    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality\n    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality\n    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality\n    $graphics.DrawImage($source, 0, 0, $size, $size)\n\n    $outputPath = Join-Path $outputDir ''ic_launcher.png''\n    $bitmap.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)\n    Write-Host ''Created:'' $outputPath ''('' $size ''x'' $size '')''\n\n    $outputPathRound = Join-Path $outputDir ''ic_launcher_round.png''\n    $bitmap.Save($outputPathRound, [System.Drawing.Imaging.ImageFormat]::Png)\n    Write-Host ''Created:'' $outputPathRound ''('' $size ''x'' $size '')''\n\n    $graphics.Dispose()\n    $bitmap.Dispose()\n}\n\n$source.Dispose()\nWrite-Host ''All icons created successfully!''\n\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"c:\\Users\\wangc\\Downloads\\LeafDocV2\\temp_create_icons.ps1\")",
+      "Bash(git log:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

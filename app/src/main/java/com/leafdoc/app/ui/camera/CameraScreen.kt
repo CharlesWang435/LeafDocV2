@@ -77,6 +77,10 @@ fun CameraScreen(
     val cropRectLocked by viewModel.cropRectLocked.collectAsState()
     val midribAlignmentEnabled by viewModel.midribAlignmentEnabled.collectAsState()
 
+    // Manual alignment state
+    val showManualAlignment by viewModel.showManualAlignment.collectAsState()
+    val alignmentBitmaps by viewModel.alignmentBitmaps.collectAsState()
+
     // Pop-out panel state
     var showLockControlsPanel by remember { mutableStateOf(false) }
 
@@ -322,6 +326,18 @@ fun CameraScreen(
                 viewModel.startNewSession(farmerId, fieldId, leafNumber)
                 showSessionDialog = false
             }
+        )
+    }
+
+    // Manual Alignment Screen
+    if (showManualAlignment && alignmentBitmaps.isNotEmpty()) {
+        ManualAlignmentScreen(
+            segments = alignmentBitmaps,
+            overlapPercent = overlapPercentage / 100f,
+            onAutoAlign = { viewModel.getAutoAlignOffsets() },
+            onGeneratePreview = { offsets -> viewModel.generatePreview(offsets) },
+            onConfirm = { offsets -> viewModel.confirmAlignment(offsets) },
+            onDismiss = { viewModel.cancelAlignment() }
         )
     }
 

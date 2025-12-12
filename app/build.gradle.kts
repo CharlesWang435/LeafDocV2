@@ -29,12 +29,25 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // API Key loaded from local.properties for security
-        // Add GEMINI_API_KEY=your_key_here to local.properties
+        // API Keys loaded from local.properties for security
+        // Add these keys to local.properties:
+        // GEMINI_API_KEY=your_key_here
+        // CLAUDE_API_KEY=your_key_here
+        // CHATGPT_API_KEY=your_key_here
         buildConfigField(
             "String",
             "GEMINI_API_KEY",
             "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "CLAUDE_API_KEY",
+            "\"${localProperties.getProperty("CLAUDE_API_KEY", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "CHATGPT_API_KEY",
+            "\"${localProperties.getProperty("CHATGPT_API_KEY", "")}\""
         )
     }
 

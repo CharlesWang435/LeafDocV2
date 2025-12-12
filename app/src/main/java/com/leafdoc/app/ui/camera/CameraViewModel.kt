@@ -10,6 +10,7 @@ import com.leafdoc.app.data.model.*
 import com.leafdoc.app.data.preferences.UserPreferencesManager
 import com.leafdoc.app.data.repository.ImageRepository
 import com.leafdoc.app.data.repository.LeafSessionRepository
+import com.leafdoc.app.stitching.MidribAligner
 import com.leafdoc.app.stitching.SimpleStitcher
 import com.leafdoc.app.stitching.StitchResult
 import com.leafdoc.app.util.LocationData
@@ -40,9 +41,17 @@ class CameraViewModel @Inject constructor(
     val cropRect: StateFlow<CropRect> = _cropRect.asStateFlow()
 
     private val simpleStitcher = SimpleStitcher()
+    private val midribAligner = MidribAligner()
 
     private var currentSession: LeafSession? = null
     private var currentLocation: LocationData? = null
+
+    // Manual alignment state
+    private val _showManualAlignment = MutableStateFlow(false)
+    val showManualAlignment: StateFlow<Boolean> = _showManualAlignment.asStateFlow()
+
+    private val _alignmentBitmaps = MutableStateFlow<List<Bitmap>>(emptyList())
+    val alignmentBitmaps: StateFlow<List<Bitmap>> = _alignmentBitmaps.asStateFlow()
 
     val overlapPercentage: StateFlow<Int> = preferencesManager.overlapGuidePercentage
         .stateIn(viewModelScope, SharingStarted.Eagerly, 10)
@@ -295,6 +304,11 @@ class CameraViewModel @Inject constructor(
         return Bitmap.createBitmap(source, left, top, width, height)
     }
 
+    /**
+     * Called when user taps "Finish Session".
+     * If multiple segments: loads images and shows manual alignment screen.
+     * If single segment: directly completes the session (no alignment needed).
+     */
     fun finishSession() {
         viewModelScope.launch {
             val session = currentSession ?: return@launch
@@ -305,14 +319,19 @@ class CameraViewModel @Inject constructor(
                 return@launch
             }
 
+            // Skip alignment screen if only one segment
+            if (segments.size == 1) {
+                finishWithSingleSegment(session, segments.first())
+                return@launch
+            }
+
             _uiState.update { it.copy(
                 isProcessing = true,
-                isStitching = true,
-                message = "Stitching ${segments.size} segments..."
+                message = "Loading images for alignment..."
             )}
 
             try {
-                // Load all segment images
+                // Load all segment images for alignment preview
                 val bitmaps = segments.mapNotNull { segment ->
                     imageRepository.loadBitmap(segment.imagePath)
                 }
@@ -321,19 +340,133 @@ class CameraViewModel @Inject constructor(
                     throw Exception("Failed to load segment images")
                 }
 
-                // Stitch images using simple stitcher with optional midrib alignment
+                // Store bitmaps for alignment screen
+                _alignmentBitmaps.value = bitmaps
+
+                _uiState.update { it.copy(
+                    isProcessing = false,
+                    message = null
+                )}
+
+                // Show manual alignment screen
+                _showManualAlignment.value = true
+
+            } catch (e: Exception) {
+                _uiState.update { it.copy(
+                    isProcessing = false,
+                    error = "Failed to load images: ${e.message}"
+                )}
+            }
+        }
+    }
+
+    /**
+     * Completes session with a single segment (no stitching/alignment needed).
+     */
+    private suspend fun finishWithSingleSegment(session: LeafSession, segment: CapturedSegmentInfo) {
+        _uiState.update { it.copy(
+            isProcessing = true,
+            isStitching = true,
+            message = "Saving image..."
+        )}
+
+        try {
+            // Load the single segment
+            val bitmap = imageRepository.loadBitmap(segment.imagePath)
+                ?: throw Exception("Failed to load segment image")
+
+            // Save as stitched image (even though it's just one segment)
+            val stitchedPath = imageRepository.saveStitchedImage(
+                bitmap = bitmap,
+                sessionId = session.id
+            )
+
+            bitmap.recycle()
+
+            // Complete session
+            sessionRepository.completeSession(session.id, stitchedPath)
+
+            _uiState.update { it.copy(
+                isProcessing = false,
+                isStitching = false,
+                sessionActive = false,
+                sessionComplete = true,
+                stitchedImagePath = stitchedPath,
+                message = "Leaf image saved successfully!"
+            )}
+        } catch (e: Exception) {
+            _uiState.update { it.copy(
+                isProcessing = false,
+                isStitching = false,
+                error = "Failed to save image: ${e.message}"
+            )}
+        }
+    }
+
+    /**
+     * Gets auto-detected Y offsets using midrib alignment.
+     * Called from alignment screen when user taps "Auto Align".
+     */
+    suspend fun getAutoAlignOffsets(): List<Int> {
+        val bitmaps = _alignmentBitmaps.value
+        if (bitmaps.isEmpty()) return emptyList()
+
+        val searchTolerance = midribSearchTolerance.value / 100f
+        return midribAligner.detectOffsets(bitmaps, searchTolerance)
+    }
+
+    /**
+     * Generates a preview bitmap with the given manual offsets.
+     * Called from alignment screen for live preview updates.
+     */
+    suspend fun generatePreview(offsets: List<Int>): Bitmap? {
+        val bitmaps = _alignmentBitmaps.value
+        if (bitmaps.isEmpty()) return null
+
+        val overlapPercent = overlapPercentage.value / 100f
+        return simpleStitcher.createPreview(
+            images = bitmaps,
+            offsets = offsets,
+            overlapPercent = overlapPercent,
+            scale = 0.3f
+        )
+    }
+
+    /**
+     * Called when user confirms alignment with their manual offsets.
+     * Performs final stitching and completes the session.
+     */
+    fun confirmAlignment(offsets: List<Int>) {
+        viewModelScope.launch {
+            val session = currentSession ?: return@launch
+            val bitmaps = _alignmentBitmaps.value
+
+            if (bitmaps.isEmpty()) {
+                _uiState.update { it.copy(error = "No images to stitch") }
+                return@launch
+            }
+
+            // Hide alignment screen
+            _showManualAlignment.value = false
+
+            _uiState.update { it.copy(
+                isProcessing = true,
+                isStitching = true,
+                message = "Stitching ${bitmaps.size} segments..."
+            )}
+
+            try {
+                // Stitch images with manual offsets
                 val overlapPercent = overlapPercentage.value / 100f
-                val alignMidrib = midribAlignmentEnabled.value
-                val searchTolerance = midribSearchTolerance.value / 100f
                 val stitchResult = simpleStitcher.stitchImages(
                     images = bitmaps,
                     overlapPercent = overlapPercent,
-                    alignMidrib = alignMidrib,
-                    midribSearchTolerance = searchTolerance
+                    alignMidrib = false, // Manual offsets override auto-alignment
+                    manualOffsets = offsets
                 )
 
-                // Recycle loaded bitmaps
-                bitmaps.forEach { it.recycle() }
+                // Clear alignment bitmaps (recycle them)
+                clearAlignmentBitmaps()
 
                 when (stitchResult) {
                     is StitchResult.Success -> {
@@ -369,6 +502,7 @@ class CameraViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                clearAlignmentBitmaps()
                 _uiState.update { it.copy(
                     isProcessing = false,
                     isStitching = false,
@@ -376,6 +510,26 @@ class CameraViewModel @Inject constructor(
                 )}
             }
         }
+    }
+
+    /**
+     * Cancels the alignment process and returns to capture mode.
+     */
+    fun cancelAlignment() {
+        _showManualAlignment.value = false
+        clearAlignmentBitmaps()
+    }
+
+    /**
+     * Clears and recycles alignment bitmaps to free memory.
+     */
+    private fun clearAlignmentBitmaps() {
+        _alignmentBitmaps.value.forEach { bitmap ->
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        }
+        _alignmentBitmaps.value = emptyList()
     }
 
     fun cancelSession() {

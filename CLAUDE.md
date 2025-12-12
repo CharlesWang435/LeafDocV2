@@ -58,7 +58,7 @@ com.leafdoc.app/
 
 1. **Capture Flow**: `CameraScreen` → `ProCameraController` (CameraX) → `CameraViewModel` → crops image to `CropRect` → `ImageRepository` saves segments → `LeafSessionRepository` stores metadata in Room
 
-2. **Stitching Flow**: `CameraViewModel.finishSession()` → `SimpleStitcher.stitchImages()` → (optional) `MidribAligner` aligns segments vertically → left-to-right concatenation with gradient blending → saves panorama
+2. **Stitching Flow**: `CameraViewModel.finishSession()` → (if multiple segments) `ManualAlignmentScreen` for Y-axis adjustment → `SimpleStitcher.stitchImages()` with manual offsets → left-to-right concatenation with gradient blending → saves panorama. Single-segment captures skip the alignment screen.
 
 3. **Diagnosis Flow**: `ResultsViewModel.analyzeDiagnosis()` → `DiagnosisRepository` → `GeminiAiService` (Google Gemini API) → parses response → updates Room
 
@@ -77,6 +77,8 @@ com.leafdoc.app/
 - **MidribGuideOverlay** (`ui/camera/`): Horizontal guide band with light green gradient appearance to help users align the leaf midrib during capture. Supports drag-to-move and edge handles for adjustable thickness. Uses local state during drag operations for smooth gesture handling. Position and thickness persist via DataStore preferences.
 
 - **Crop Coordinate Mapping**: The camera preview uses `FILL_CENTER` scaling, which may crop the image differently than the preview shows. `CameraViewModel.cropBitmap()` calculates the visible region based on aspect ratio differences between the captured image and preview, then maps the crop rectangle coordinates accordingly for accurate cropping.
+
+- **ManualAlignmentScreen** (`ui/camera/`): Fullscreen dialog for manual Y-axis alignment before stitching. Shows live preview synchronized with segment thumbnails, +/- buttons to adjust each segment's vertical offset (±500px range), and "Auto Align" button that applies `MidribAligner` detection as a starting point. Available both during capture flow and from `ResultsScreen` for re-alignment of saved sessions.
 
 ### Database Schema
 
@@ -98,34 +100,54 @@ Key fields for displaying AI analysis results:
 ### DI Modules
 
 - `DatabaseModule`: Provides Room database and DAOs (singleton)
-- `NetworkModule`: Provides Gson for JSON serialization
+- `NetworkModule`: Provides Gson, OkHttpClient (30s connect, 60s read/write timeouts)
+- `AiModule`: Provides AI providers (Gemini, Claude, ChatGPT) and AiProviderFactory
 - `AppModule`: Provides repositories, preferences manager, location manager
 
 ## Configuration
 
-The Gemini API key is loaded from `local.properties` (not committed to source control):
+API keys are loaded from `local.properties` (not committed to source control):
 ```properties
-GEMINI_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_gemini_key_here
+CLAUDE_API_KEY=your_anthropic_key_here
+CHATGPT_API_KEY=your_openai_key_here
 ```
 
-Get your API key from [Google AI Studio](https://aistudio.google.com/apikey). Copy `local.properties.example` to `local.properties` and add your key. The build script in `app/build.gradle.kts` reads this file automatically.
+Get API keys from:
+- [Google AI Studio](https://aistudio.google.com/apikey) for Gemini
+- [Anthropic Console](https://console.anthropic.com/) for Claude
+- [OpenAI Platform](https://platform.openai.com/) for ChatGPT
 
-## AI Diagnosis
+Copy `local.properties.example` to `local.properties` and add your keys. The build script reads this file automatically. At least one provider must be configured.
 
-The `GeminiAiService` uses Gemini 2.5 Flash to analyze corn leaf images. The response includes:
-- `leafDescription`: Detailed visual description of the leaf (color, lesions, midrib condition, surface texture, etc.)
-- `healthScore`: Estimated health indicator (0-100) - presented as an estimate, not a definitive diagnosis
-- `diseases`: List of potential diseases with probability, severity, and treatments
-- `suggestions`: Actionable recommendations
+## AI Diagnosis System
 
-The prompt is specialized for corn diseases including:
-- Northern Corn Leaf Blight (Exserohilum turcicum)
-- Gray Leaf Spot (Cercospora zeae-maydis)
-- Southern Corn Leaf Blight (Cochliobolus heterostrophus)
-- Common Rust (Puccinia sorghi)
-- Anthracnose (Colletotrichum graminicola)
-- Goss's Wilt (Clavibacter michiganensis)
-- Eyespot, Holcus Spot, Tar Spot, Diplodia Leaf Streak, Physoderma Brown Spot
+### Multi-Provider Architecture
+
+The app supports three AI providers via the `AiProvider` interface:
+- **GeminiAiProvider**: Google Gemini 2.5 Flash (default, recommended)
+- **ClaudeAiProvider**: Anthropic Claude 3.5 Sonnet
+- **ChatGptAiProvider**: OpenAI GPT-4o
+
+`AiProviderFactory` manages provider instances and checks configuration status. `DiagnosisRepository.analyzeLeaf()` accepts optional `overrideProvider` and `overridePromptId` parameters for reanalysis with different models.
+
+### Prompt Templates
+
+`PromptLibrary` contains four predefined prompt templates optimized for corn diagnosis:
+- **quick_check**: Fast preliminary screening (~5s, 1024 tokens)
+- **standard_analysis**: Balanced detail with treatments (~15s, 2048 tokens)
+- **detailed_diagnosis**: Comprehensive pathology report (~30s, 4096 tokens)
+- **research_mode**: Maximum detail for research/academic use (~30s, 4096 tokens)
+
+Templates use `PromptTemplate.buildPrompt()` to inject location context and imaging method. All templates share a common JSON output format and corn disease database.
+
+### Reanalysis Feature
+
+`ResultsViewModel.reanalyzeDiagnosis(provider, promptId)` allows rerunning analysis with different AI models and prompt templates. `ResultsScreen` shows a `ReanalyzeDialog` for model/prompt selection.
+
+### Supported Diseases
+
+Prompts are specialized for corn diseases: Northern Corn Leaf Blight, Gray Leaf Spot, Southern Corn Leaf Blight, Common Rust, Anthracnose, Goss's Wilt, Eyespot, Holcus Spot, Tar Spot, Diplodia Leaf Streak, Physoderma Brown Spot (plus additional pathogens in research mode)
 
 ## Logging
 
@@ -160,12 +182,12 @@ The stitching system has two main components:
 
 1. **SimpleStitcher**: Concatenates segments left-to-right with configurable overlap percentage (default 10%). Uses linear gradient blending in overlap regions for smooth transitions.
 
-2. **MidribAligner** (optional, enabled by default):
+2. **MidribAligner** (used by ManualAlignmentScreen's "Auto Align"):
    - Uses green channel dominance analysis to detect the midrib (central vein)
    - Calculates green ratio `green / (red + green + blue)` for each pixel
    - Uses sliding window to find the horizontal band with highest green dominance
-   - Calculates vertical offset needed to align each segment's midrib to a reference position
-   - Creates shifted bitmaps before stitching to eliminate "staircase" effect from hand movement
+   - `detectOffsets()` returns Y offsets without creating new bitmaps (for UI preview)
+   - Eliminates "staircase" effect from hand movement during capture
 
 Settings controlled in `UserPreferencesManager`:
 - `midribAlignmentEnabled`: Toggle auto-alignment on/off
