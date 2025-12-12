@@ -9,12 +9,14 @@ import androidx.navigation.navArgument
 import com.leafdoc.app.ui.camera.CameraScreen
 import com.leafdoc.app.ui.gallery.GalleryScreen
 import com.leafdoc.app.ui.results.ResultsScreen
+import com.leafdoc.app.ui.settings.AiSettingsScreen
 import com.leafdoc.app.ui.settings.SettingsScreen
 
 sealed class Screen(val route: String) {
     data object Camera : Screen("camera")
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
+    data object AiSettings : Screen("ai_settings")
     data object Results : Screen("results/{sessionId}") {
         fun createRoute(sessionId: String) = "results/$sessionId"
     }
@@ -61,6 +63,17 @@ fun NavGraph(
 
         composable(Screen.Settings.route) {
             SettingsScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToAiSettings = {
+                    navController.navigate(Screen.AiSettings.route)
+                }
+            )
+        }
+
+        composable(Screen.AiSettings.route) {
+            AiSettingsScreen(
                 onNavigateBack = {
                     navController.popBackStack()
                 }

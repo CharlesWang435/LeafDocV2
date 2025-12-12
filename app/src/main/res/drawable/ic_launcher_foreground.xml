@@ -5,55 +5,55 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Leaf shape - centered in the safe zone (24dp inset on each side) -->
+    <!-- Corn leaf icon - original style with parallel veins -->
     <group
         android:translateX="54"
         android:translateY="54">
 
-        <!-- Main leaf body -->
+        <!-- Main corn leaf body - elongated blade shape -->
         <path
             android:fillColor="#FFFFFF"
-            android:pathData="M-18,20
-                Q-20,10 -15,0
-                Q-10,-15 0,-20
-                Q10,-15 15,0
-                Q20,10 18,20
-                Q10,25 0,22
-                Q-10,25 -18,20
+            android:pathData="M-12,22
+                Q-14,12 -12,0
+                Q-10,-12 0,-22
+                Q10,-12 12,0
+                Q14,12 12,22
+                Q6,26 0,24
+                Q-6,26 -12,22
                 Z"/>
 
-        <!-- Leaf vein - center -->
+        <!-- Leaf vein - center midrib -->
         <path
             android:strokeColor="#2E7D32"
             android:strokeWidth="2"
-            android:pathData="M0,-18 L0,20"/>
+            android:pathData="M0,-20 L0,22"/>
 
-        <!-- Leaf veins - left -->
+        <!-- Parallel veins - left side -->
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,-10 L-10,0"/>
+            android:strokeWidth="0.8"
+            android:pathData="M-4,-16 L-4,22"/>
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,0 L-12,8"/>
+            android:strokeWidth="0.8"
+            android:pathData="M-7,-10 L-7,22"/>
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,10 L-10,16"/>
+            android:strokeWidth="0.8"
+            android:pathData="M-10,-2 L-10,18"/>
 
-        <!-- Leaf veins - right -->
+        <!-- Parallel veins - right side -->
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,-10 L10,0"/>
+            android:strokeWidth="0.8"
+            android:pathData="M4,-16 L4,22"/>
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,0 L12,8"/>
+            android:strokeWidth="0.8"
+            android:pathData="M7,-10 L7,22"/>
         <path
             android:strokeColor="#2E7D32"
-            android:strokeWidth="1.5"
-            android:pathData="M0,10 L10,16"/>
+            android:strokeWidth="0.8"
+            android:pathData="M10,-2 L10,18"/>
     </group>
 </vector>

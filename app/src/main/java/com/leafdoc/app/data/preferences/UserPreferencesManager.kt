@@ -51,6 +51,10 @@ class UserPreferencesManager(private val context: Context) {
         val MIDRIB_GUIDE_THICKNESS = floatPreferencesKey("midrib_guide_thickness")
         val MIDRIB_GUIDE_LOCKED = booleanPreferencesKey("midrib_guide_locked")
         val CROP_RECT_LOCKED = booleanPreferencesKey("crop_rect_locked")
+
+        // AI diagnosis settings
+        val AI_PROVIDER = stringPreferencesKey("ai_provider")
+        val PROMPT_TEMPLATE_ID = stringPreferencesKey("prompt_template_id")
     }
 
     val cameraSettings: Flow<CameraSettings> = context.dataStore.data.map { preferences ->
@@ -141,6 +145,20 @@ class UserPreferencesManager(private val context: Context) {
 
     val cropRectLocked: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.CROP_RECT_LOCKED] ?: false
+    }
+
+    val aiProvider: Flow<AiProviderType> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.AI_PROVIDER]?.let {
+            try {
+                AiProviderType.valueOf(it)
+            } catch (e: IllegalArgumentException) {
+                AiProviderType.GEMINI  // Default fallback
+            }
+        } ?: AiProviderType.GEMINI  // Default to Gemini
+    }
+
+    val promptTemplateId: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.PROMPT_TEMPLATE_ID] ?: "standard_analysis"  // Default to standard analysis
     }
 
     suspend fun updateCameraSettings(settings: CameraSettings) {
@@ -244,6 +262,18 @@ class UserPreferencesManager(private val context: Context) {
     suspend fun updateCropRectLocked(locked: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.CROP_RECT_LOCKED] = locked
+        }
+    }
+
+    suspend fun updateAiProvider(provider: AiProviderType) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.AI_PROVIDER] = provider.name
+        }
+    }
+
+    suspend fun updatePromptTemplateId(templateId: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PROMPT_TEMPLATE_ID] = templateId
         }
     }
 }

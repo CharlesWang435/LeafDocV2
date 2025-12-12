@@ -45,11 +45,12 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDiagnosisRepository(
-        geminiAiService: GeminiAiService,
+        aiProviderFactory: com.leafdoc.app.data.remote.ai.AiProviderFactory,
+        preferencesManager: UserPreferencesManager,
         sessionDao: LeafSessionDao,
         gson: Gson
     ): DiagnosisRepository {
-        return DiagnosisRepository(geminiAiService, sessionDao, gson)
+        return DiagnosisRepository(aiProviderFactory, preferencesManager, sessionDao, gson)
     }
 
     @Provides

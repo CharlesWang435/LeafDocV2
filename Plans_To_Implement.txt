@@ -1,0 +1,14 @@
+things to add:
+1. After taking all the images during a leaf scan, allow the user to manually adjust the images prior to stitching. This way we can fix the y axis alignment issue. So before the auto stitching, give the user a choice to review their images and can adjust there y positioning before the stitch, then click confirm to continue stitching all the images together.
+
+2. Allow different stitching positions, leaf can pulled from the right side which will require the opposite stitching style as of right now. 
+	-furthermore, the leaf can be pushed into the device tip going in on the left or right. we need settings for these 4 stitching orientation.
+
+3. Allow choice in AI models, include claude api and chatgpt api, selection of premade prompts for user to choose from. The prompts will have a simple description for the user to see, but the actually prompt will be extremely detailed, created by us to get the best diagnosis.
+
+4. Ask for help adding additional features, like the light diffusion level detection, what the focal distance is? can the app detect how far the leaf is from its camera? 
+
+5. Brainstorm how the app can have another automatic scanning method where the user just needs to pull leaf through device and app will automatically scan and stitch a whole corn leaf pano image.
+
+
+

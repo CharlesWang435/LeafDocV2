@@ -5,8 +5,11 @@ import android.graphics.BitmapFactory
 import com.google.gson.Gson
 import com.leafdoc.app.data.local.LeafSessionDao
 import com.leafdoc.app.data.model.*
-import com.leafdoc.app.data.remote.GeminiAiService
+import com.leafdoc.app.data.preferences.UserPreferencesManager
+import com.leafdoc.app.data.remote.ai.AiProviderFactory
+import com.leafdoc.app.data.remote.ai.prompts.PromptLibrary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -15,7 +18,8 @@ import javax.inject.Singleton
 
 @Singleton
 class DiagnosisRepository @Inject constructor(
-    private val geminiAiService: GeminiAiService,
+    private val aiProviderFactory: AiProviderFactory,
+    private val preferencesManager: UserPreferencesManager,
     private val sessionDao: LeafSessionDao,
     private val gson: Gson
 ) {
@@ -23,7 +27,9 @@ class DiagnosisRepository @Inject constructor(
         sessionId: String,
         imagePath: String,
         latitude: Double? = null,
-        longitude: Double? = null
+        longitude: Double? = null,
+        overrideProvider: AiProviderType? = null,
+        overridePromptId: String? = null
     ): Result<DiagnosisDisplay> = withContext(Dispatchers.IO) {
         try {
             // Update status to uploading
@@ -46,10 +52,31 @@ class DiagnosisRepository @Inject constructor(
             // Update status to processing
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.PROCESSING, null, null)
 
-            // Analyze with Gemini
-            val result = geminiAiService.analyzeLeafImage(
+            // Use override values or get from user preferences
+            val selectedProvider = overrideProvider ?: preferencesManager.aiProvider.first()
+            val promptTemplateId = overridePromptId ?: preferencesManager.promptTemplateId.first()
+
+            // Get the AI provider
+            val aiProvider = aiProviderFactory.getProvider(selectedProvider)
+            if (aiProvider == null) {
+                val errorMsg = "AI provider ${selectedProvider.displayName} is not configured. Please check API keys in settings."
+                sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, errorMsg, null)
+                bitmap.recycle()
+                return@withContext Result.failure(Exception(errorMsg))
+            }
+
+            // Build prompt from template
+            val promptTemplate = PromptLibrary.getTemplateById(promptTemplateId)
+                ?: PromptLibrary.getStandardAnalysisTemplate()
+            val promptText = promptTemplate.buildPrompt(latitude, longitude)
+
+            Timber.d("Using AI provider: ${selectedProvider.displayName}, Template: ${promptTemplate.info.displayName}")
+
+            // Analyze with selected AI provider
+            val result = aiProvider.analyzeLeafImage(
                 sessionId = sessionId,
                 bitmap = bitmap,
+                promptText = promptText,
                 latitude = latitude,
                 longitude = longitude
             )
@@ -68,7 +95,7 @@ class DiagnosisRepository @Inject constructor(
                     Result.success(diagnosis)
                 },
                 onFailure = { error ->
-                    Timber.e(error, "Gemini analysis failed")
+                    Timber.e(error, "${selectedProvider.displayName} analysis failed")
                     sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, error.message, null)
                     Result.failure(error)
                 }
@@ -94,9 +121,30 @@ class DiagnosisRepository @Inject constructor(
 
             sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.PROCESSING, null, null)
 
-            val result = geminiAiService.analyzeLeafImage(
+            // Get user preferences for AI provider and prompt template
+            val selectedProvider = preferencesManager.aiProvider.first()
+            val promptTemplateId = preferencesManager.promptTemplateId.first()
+
+            // Get the AI provider
+            val aiProvider = aiProviderFactory.getProvider(selectedProvider)
+            if (aiProvider == null) {
+                val errorMsg = "AI provider ${selectedProvider.displayName} is not configured. Please check API keys in settings."
+                sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, errorMsg, null)
+                if (resizedBitmap != bitmap) {
+                    resizedBitmap.recycle()
+                }
+                return@withContext Result.failure(Exception(errorMsg))
+            }
+
+            // Build prompt from template
+            val promptTemplate = PromptLibrary.getTemplateById(promptTemplateId)
+                ?: PromptLibrary.getStandardAnalysisTemplate()
+            val promptText = promptTemplate.buildPrompt(latitude, longitude)
+
+            val result = aiProvider.analyzeLeafImage(
                 sessionId = sessionId,
                 bitmap = resizedBitmap,
+                promptText = promptText,
                 latitude = latitude,
                 longitude = longitude
             )
@@ -116,7 +164,7 @@ class DiagnosisRepository @Inject constructor(
                     Result.success(diagnosis)
                 },
                 onFailure = { error ->
-                    Timber.e(error, "Gemini analysis failed")
+                    Timber.e(error, "${selectedProvider.displayName} analysis failed")
                     sessionDao.updateDiagnosis(sessionId, DiagnosisStatus.FAILED, error.message, null)
                     Result.failure(error)
                 }

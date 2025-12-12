@@ -128,6 +128,34 @@ class MidribAligner {
     }
 
     /**
+     * Detects midrib positions and returns the vertical offsets needed to align all images.
+     * This is useful for manual alignment where the user can see and adjust the offsets.
+     *
+     * @param images List of images to analyze
+     * @param searchTolerancePercent Search tolerance for midrib detection (0.0-1.0)
+     * @return List of vertical offsets in pixels (positive = shift down, negative = shift up).
+     *         First image always has offset 0 (it's the reference).
+     */
+    suspend fun detectOffsets(
+        images: List<Bitmap>,
+        searchTolerancePercent: Float = 0.5f
+    ): List<Int> = withContext(Dispatchers.Default) {
+        if (images.isEmpty()) return@withContext emptyList()
+        if (images.size == 1) return@withContext listOf(0)
+
+        // Detect midrib in all images
+        val detections = images.map { detectMidrib(it, searchTolerancePercent) }
+
+        // Use first image's midrib as reference
+        val referenceY = detections.first().midribY
+
+        // Calculate vertical offset for each image to align to reference
+        detections.map { detection ->
+            referenceY - detection.midribY
+        }
+    }
+
+    /**
      * Aligns multiple images so their midribs are at the same vertical position.
      *
      * @param images List of images to align

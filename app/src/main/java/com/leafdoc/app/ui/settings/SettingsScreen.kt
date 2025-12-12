@@ -19,6 +19,7 @@ import com.leafdoc.app.data.model.*
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToAiSettings: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val cameraSettings by viewModel.cameraSettings.collectAsState()
@@ -91,6 +92,16 @@ fun SettingsScreen(
                         viewModel.updateFieldId(it)
                     },
                     icon = Icons.Default.Landscape
+                )
+            }
+
+            // AI Diagnosis Section
+            SettingsSection(title = "AI Diagnosis") {
+                SettingsNavigationRow(
+                    label = "AI Provider & Prompts",
+                    description = "Choose AI model and analysis type",
+                    icon = Icons.Default.Psychology,
+                    onClick = onNavigateToAiSettings
                 )
             }
 
@@ -540,6 +551,50 @@ private fun SettingsInfoRow(
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(
+    label: String,
+    description: String? = null,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (description != null) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = "Navigate",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
