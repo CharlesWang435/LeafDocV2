@@ -76,3 +76,11 @@ secrets.properties
 credentials.json
 *.pem
 *.p12
+
+# Project-specific exclusions
+Plans_To_Implement.txt
+app icon/
+.kotlin/
+Image_Stitching_Results/
+Report Material Folder/
+report_draft.md
