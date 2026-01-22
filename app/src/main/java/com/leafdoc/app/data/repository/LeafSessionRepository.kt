@@ -102,9 +102,17 @@ class LeafSessionRepository @Inject constructor(
         whiteBalance: Int? = null,
         exposureCompensation: Float? = null,
         focusDistance: Float? = null,
-        overlapPercentage: Float = 0f
+        overlapPercentage: Float = 0f,
+        isMultiFrameSession: Boolean = true
     ): LeafSegment {
         val nextIndex = (segmentDao.getMaxSegmentIndex(sessionId) ?: -1) + 1
+
+        // Generate frame label only for multi-frame sessions (user preference)
+        val frameLabel = if (isMultiFrameSession) {
+            "Frame ${nextIndex + 1}"
+        } else {
+            null
+        }
 
         val segment = LeafSegment(
             sessionId = sessionId,
@@ -120,6 +128,7 @@ class LeafSessionRepository @Inject constructor(
             whiteBalance = whiteBalance,
             exposureCompensation = exposureCompensation,
             focusDistance = focusDistance,
+            frameLabel = frameLabel,
             overlapPercentage = overlapPercentage
         )
 
@@ -127,6 +136,10 @@ class LeafSessionRepository @Inject constructor(
         sessionDao.incrementSegmentCount(sessionId)
 
         return segment
+    }
+
+    suspend fun updateSegment(segment: LeafSegment) {
+        segmentDao.updateSegment(segment)
     }
 
     suspend fun deleteSegment(segmentId: String) {

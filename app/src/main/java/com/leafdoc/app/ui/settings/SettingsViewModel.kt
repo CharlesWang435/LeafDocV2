@@ -125,6 +125,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun updateExportMode(mode: ExportMode) {
+        viewModelScope.launch {
+            preferencesManager.updateExportMode(mode)
+        }
+    }
+
     fun updateExportQuality(quality: Int) {
         viewModelScope.launch {
             preferencesManager.updateExportSettings(

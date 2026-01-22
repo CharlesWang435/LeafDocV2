@@ -186,6 +186,7 @@ class ResultsViewModel @Inject constructor(
                     _uiState.update { it.copy(
                         isExporting = false,
                         exportedUri = uri,
+                        exportedUris = emptyList(),  // clear bulk exports
                         message = "Image exported successfully"
                     )}
                 } else {
@@ -222,6 +223,118 @@ class ResultsViewModel @Inject constructor(
         return "${parts.joinToString("_")}.${format.extension}"
     }
 
+    fun exportIndividualFrames(format: ImageFormat? = null) {
+        viewModelScope.launch {
+            val sess = session.value ?: return@launch
+            val segList = segments.value
+
+            if (segList.isEmpty()) {
+                _uiState.update { it.copy(error = "No frames to export") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isExporting = true, error = null, exportProgress = Pair(0, segList.size)) }
+
+            try {
+                val settings = if (format != null) {
+                    exportSettings.value.copy(format = format)
+                } else {
+                    exportSettings.value
+                }
+
+                val uris = imageRepository.exportAllSegments(
+                    session = sess,
+                    segments = segList,
+                    settings = settings
+                ) { current, total ->
+                    _uiState.update { it.copy(exportProgress = Pair(current, total)) }
+                }
+
+                _uiState.update { it.copy(
+                    isExporting = false,
+                    exportProgress = null,
+                    exportedUri = null,  // clear single export
+                    exportedUris = uris,
+                    message = "Exported ${uris.size} frame${if (uris.size != 1) "s" else ""} successfully"
+                )}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(
+                    isExporting = false,
+                    exportProgress = null,
+                    error = "Export failed: ${e.message}"
+                )}
+            }
+        }
+    }
+
+    fun exportBoth(format: ImageFormat? = null) {
+        viewModelScope.launch {
+            val sess = session.value ?: return@launch
+            val stitchedPath = sess.stitchedImagePath
+            val segList = segments.value
+
+            if (stitchedPath == null && segList.isEmpty()) {
+                _uiState.update { it.copy(error = "No images to export") }
+                return@launch
+            }
+
+            val totalCount = (if (stitchedPath != null) 1 else 0) + segList.size
+            _uiState.update { it.copy(isExporting = true, error = null, exportProgress = Pair(0, totalCount)) }
+
+            try {
+                val settings = if (format != null) {
+                    exportSettings.value.copy(format = format)
+                } else {
+                    exportSettings.value
+                }
+
+                val allUris = mutableListOf<Uri>()
+
+                // Export stitched image first
+                if (stitchedPath != null) {
+                    val fileName = buildExportFileName(sess, settings.format)
+                    val uri = imageRepository.exportImage(stitchedPath, settings, fileName)
+                    if (uri != null) allUris.add(uri)
+                    _uiState.update { it.copy(exportProgress = Pair(1, totalCount)) }
+                }
+
+                // Export all segments
+                val segmentUris = imageRepository.exportAllSegments(
+                    session = sess,
+                    segments = segList,
+                    settings = settings
+                ) { current, total ->
+                    val overallProgress = (if (stitchedPath != null) 1 else 0) + current
+                    _uiState.update { it.copy(exportProgress = Pair(overallProgress, totalCount)) }
+                }
+                allUris.addAll(segmentUris)
+
+                val stitchedCount = if (stitchedPath != null) 1 else 0
+                _uiState.update { it.copy(
+                    isExporting = false,
+                    exportProgress = null,
+                    exportedUri = null,  // clear single export
+                    exportedUris = allUris,
+                    message = "Exported ${allUris.size} images ($stitchedCount stitched + ${segmentUris.size} frames)"
+                )}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(
+                    isExporting = false,
+                    exportProgress = null,
+                    error = "Export failed: ${e.message}"
+                )}
+            }
+        }
+    }
+
+    fun exportWithMode(mode: ExportMode, format: ImageFormat? = null) {
+        when (mode) {
+            ExportMode.STITCHED_ONLY -> exportImage(format)
+            ExportMode.FRAMES_ONLY -> exportIndividualFrames(format)
+            ExportMode.BOTH -> exportBoth(format)
+        }
+    }
+
     fun shareImage() {
         viewModelScope.launch {
             val sess = session.value ?: return@launch
@@ -234,6 +347,23 @@ class ResultsViewModel @Inject constructor(
                 _uiState.update { it.copy(error = "Failed to share: ${e.message}") }
             }
         }
+    }
+
+    fun shareMultipleImages() {
+        viewModelScope.launch {
+            val uris = uiState.value.exportedUris
+            if (uris.isEmpty()) {
+                _uiState.update { it.copy(error = "No images to share") }
+                return@launch
+            }
+
+            // Trigger system share with ArrayList
+            _uiState.update { it.copy(shareUris = ArrayList(uris)) }
+        }
+    }
+
+    fun clearShareUris() {
+        _uiState.update { it.copy(shareUris = null) }
     }
 
     fun updateExportFormat(format: ImageFormat) {
@@ -458,8 +588,11 @@ data class ResultsUiState(
     val isAnalyzing: Boolean = false,
     val isExporting: Boolean = false,
     val isLoading: Boolean = false,
+    val exportProgress: Pair<Int, Int>? = null,  // (current, total)
     val exportedUri: Uri? = null,
+    val exportedUris: List<Uri> = emptyList(),  // for bulk exports
     val shareUri: Uri? = null,
+    val shareUris: ArrayList<Uri>? = null,  // for bulk sharing
     val sessionDeleted: Boolean = false,
     val message: String? = null,
     val error: String? = null

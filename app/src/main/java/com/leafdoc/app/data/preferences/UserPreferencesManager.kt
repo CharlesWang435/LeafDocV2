@@ -32,6 +32,7 @@ class UserPreferencesManager(private val context: Context) {
         val EXPORT_QUALITY = intPreferencesKey("export_quality")
         val EXPORT_INCLUDE_METADATA = booleanPreferencesKey("export_include_metadata")
         val EXPORT_LOCATION = stringPreferencesKey("export_location")
+        val EXPORT_MODE = stringPreferencesKey("export_mode")
 
         // User info
         val FARMER_ID = stringPreferencesKey("farmer_id")
@@ -51,6 +52,7 @@ class UserPreferencesManager(private val context: Context) {
         val MIDRIB_GUIDE_THICKNESS = floatPreferencesKey("midrib_guide_thickness")
         val MIDRIB_GUIDE_LOCKED = booleanPreferencesKey("midrib_guide_locked")
         val CROP_RECT_LOCKED = booleanPreferencesKey("crop_rect_locked")
+        val CROP_RECT_ENABLED = booleanPreferencesKey("crop_rect_enabled")
 
         // AI diagnosis settings
         val AI_PROVIDER = stringPreferencesKey("ai_provider")
@@ -91,7 +93,14 @@ class UserPreferencesManager(private val context: Context) {
             includeMetadata = preferences[PreferencesKeys.EXPORT_INCLUDE_METADATA] ?: true,
             exportLocation = preferences[PreferencesKeys.EXPORT_LOCATION]?.let {
                 ExportLocation.valueOf(it)
-            } ?: ExportLocation.PICTURES_FOLDER
+            } ?: ExportLocation.PICTURES_FOLDER,
+            exportMode = preferences[PreferencesKeys.EXPORT_MODE]?.let {
+                try {
+                    ExportMode.valueOf(it)
+                } catch (e: IllegalArgumentException) {
+                    ExportMode.STITCHED_ONLY
+                }
+            } ?: ExportMode.STITCHED_ONLY
         )
     }
 
@@ -147,6 +156,10 @@ class UserPreferencesManager(private val context: Context) {
         preferences[PreferencesKeys.CROP_RECT_LOCKED] ?: false
     }
 
+    val cropRectEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.CROP_RECT_ENABLED] ?: true // Enabled by default
+    }
+
     val aiProvider: Flow<AiProviderType> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.AI_PROVIDER]?.let {
             try {
@@ -184,6 +197,13 @@ class UserPreferencesManager(private val context: Context) {
             preferences[PreferencesKeys.EXPORT_QUALITY] = settings.quality
             preferences[PreferencesKeys.EXPORT_INCLUDE_METADATA] = settings.includeMetadata
             preferences[PreferencesKeys.EXPORT_LOCATION] = settings.exportLocation.name
+            preferences[PreferencesKeys.EXPORT_MODE] = settings.exportMode.name
+        }
+    }
+
+    suspend fun updateExportMode(mode: ExportMode) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.EXPORT_MODE] = mode.name
         }
     }
 
@@ -262,6 +282,12 @@ class UserPreferencesManager(private val context: Context) {
     suspend fun updateCropRectLocked(locked: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.CROP_RECT_LOCKED] = locked
+        }
+    }
+
+    suspend fun updateCropRectEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.CROP_RECT_ENABLED] = enabled
         }
     }
 

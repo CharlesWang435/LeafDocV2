@@ -45,6 +45,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.leafdoc.app.camera.CameraCapabilities
 import com.leafdoc.app.camera.CameraState
+import com.leafdoc.app.camera.LensInfo
+import com.leafdoc.app.camera.LensType
 import com.leafdoc.app.camera.ProCameraController
 import com.leafdoc.app.data.model.*
 import kotlinx.coroutines.launch
@@ -75,6 +77,7 @@ fun CameraScreen(
     val midribGuideThickness by viewModel.midribGuideThickness.collectAsState()
     val midribGuideLocked by viewModel.midribGuideLocked.collectAsState()
     val cropRectLocked by viewModel.cropRectLocked.collectAsState()
+    val cropRectEnabled by viewModel.cropRectEnabled.collectAsState()
     val midribAlignmentEnabled by viewModel.midribAlignmentEnabled.collectAsState()
 
     // Manual alignment state
@@ -95,6 +98,7 @@ fun CameraScreen(
     val cameraCapabilities by cameraController?.cameraCapabilities?.collectAsState() ?: remember { mutableStateOf(null) }
     val cameraState by cameraController?.cameraState?.collectAsState() ?: remember { mutableStateOf(CameraState.Idle) }
     val histogramData by cameraController?.histogramData?.collectAsState() ?: remember { mutableStateOf(null) }
+    val currentLens by cameraController?.currentLens?.collectAsState() ?: remember { mutableStateOf(null) }
 
     val permissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -173,14 +177,16 @@ fun CameraScreen(
                 )
             }
 
-            // Crop Rectangle Overlay (always visible)
-            CropRectangleOverlay(
-                cropRect = cropRect,
-                onCropRectChanged = { viewModel.updateCropRect(it) },
-                isLocked = cropRectLocked,
-                enabled = !uiState.isProcessing,
-                modifier = Modifier.fillMaxSize()
-            )
+            // Crop Rectangle Overlay (only if enabled)
+            if (cropRectEnabled) {
+                CropRectangleOverlay(
+                    cropRect = cropRect,
+                    onCropRectChanged = { viewModel.updateCropRect(it) },
+                    isLocked = cropRectLocked,
+                    enabled = !uiState.isProcessing,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Midrib Guide Line (horizontal guide for aligning the leaf midrib)
             if (midribGuideEnabled) {
@@ -195,18 +201,23 @@ fun CameraScreen(
                 )
             }
 
-            // Top Bar with pop-out trigger/panel in center
+            // Top Bar with pop-out trigger/panel in center and lens selector
             TopBar(
                 sessionActive = uiState.sessionActive,
+                availableLenses = cameraCapabilities?.availableLenses ?: emptyList(),
+                currentLens = currentLens,
+                onLensSelected = { lens -> cameraController?.switchLens(lens) },
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
                 onGalleryClick = onNavigateToGallery,
                 showLockControlsPanel = showLockControlsPanel,
                 onToggleLockControlsPanel = { showLockControlsPanel = !showLockControlsPanel },
+                cropRectEnabled = cropRectEnabled,
                 cropRectLocked = cropRectLocked,
                 midribGuideLocked = midribGuideLocked,
                 midribGuideEnabled = midribGuideEnabled,
                 midribAlignmentEnabled = midribAlignmentEnabled,
+                onToggleCropEnabled = { viewModel.toggleCropRectEnabled() },
                 onToggleCropLock = { viewModel.toggleCropRectLocked() },
                 onToggleMidribLock = { viewModel.toggleMidribGuideLocked() },
                 onToggleMidribGuide = { viewModel.toggleMidribGuideEnabled() },
@@ -359,12 +370,17 @@ private fun TopBar(
     segmentCount: Int,
     onSettingsClick: () -> Unit,
     onGalleryClick: () -> Unit,
+    availableLenses: List<LensInfo>,
+    currentLens: LensInfo?,
+    onLensSelected: (LensInfo) -> Unit,
     showLockControlsPanel: Boolean,
     onToggleLockControlsPanel: () -> Unit,
+    cropRectEnabled: Boolean,
     cropRectLocked: Boolean,
     midribGuideLocked: Boolean,
     midribGuideEnabled: Boolean,
     midribAlignmentEnabled: Boolean,
+    onToggleCropEnabled: () -> Unit,
     onToggleCropLock: () -> Unit,
     onToggleMidribLock: () -> Unit,
     onToggleMidribGuide: () -> Unit,
@@ -416,10 +432,12 @@ private fun TopBar(
         } else if (showLockControlsPanel) {
             // Horizontal controls panel (replaces the arrow when expanded)
             HorizontalLockControlsPanel(
+                cropRectEnabled = cropRectEnabled,
                 cropRectLocked = cropRectLocked,
                 midribGuideLocked = midribGuideLocked,
                 midribGuideEnabled = midribGuideEnabled,
                 midribAlignmentEnabled = midribAlignmentEnabled,
+                onToggleCropEnabled = onToggleCropEnabled,
                 onToggleCropLock = onToggleCropLock,
                 onToggleMidribLock = onToggleMidribLock,
                 onToggleMidribGuide = onToggleMidribGuide,
@@ -441,6 +459,15 @@ private fun TopBar(
                     modifier = Modifier.size(28.dp)
                 )
             }
+        }
+
+        // Lens selector (if multiple lenses available)
+        if (availableLenses.size > 1) {
+            LensSelector(
+                availableLenses = availableLenses,
+                currentLens = currentLens,
+                onLensSelected = onLensSelected
+            )
         }
 
         IconButton(
@@ -1307,10 +1334,12 @@ private fun ControlRow(
 
 @Composable
 private fun HorizontalLockControlsPanel(
+    cropRectEnabled: Boolean,
     cropRectLocked: Boolean,
     midribGuideLocked: Boolean,
     midribGuideEnabled: Boolean,
     midribAlignmentEnabled: Boolean,
+    onToggleCropEnabled: () -> Unit,
     onToggleCropLock: () -> Unit,
     onToggleMidribLock: () -> Unit,
     onToggleMidribGuide: () -> Unit,
@@ -1349,15 +1378,27 @@ private fun HorizontalLockControlsPanel(
                     .background(Color.White.copy(alpha = 0.3f))
             )
 
-            // Crop rectangle lock toggle
+            // Crop rectangle enabled toggle
             HorizontalToggleButton(
                 label = "Crop",
-                isActive = cropRectLocked,
-                activeIcon = Icons.Default.Lock,
-                inactiveIcon = Icons.Default.LockOpen,
-                activeColor = Color.Yellow,
-                onClick = onToggleCropLock
+                isActive = cropRectEnabled,
+                activeIcon = Icons.Default.CropFree,
+                inactiveIcon = Icons.Outlined.CropFree,
+                activeColor = Color.Cyan,
+                onClick = onToggleCropEnabled
             )
+
+            // Crop rectangle lock toggle (only if crop is enabled)
+            if (cropRectEnabled) {
+                HorizontalToggleButton(
+                    label = "Lock",
+                    isActive = cropRectLocked,
+                    activeIcon = Icons.Default.Lock,
+                    inactiveIcon = Icons.Default.LockOpen,
+                    activeColor = Color.Yellow,
+                    onClick = onToggleCropLock
+                )
+            }
 
             // Midrib guide visibility toggle
             HorizontalToggleButton(
@@ -1422,6 +1463,85 @@ private fun HorizontalToggleButton(
             fontSize = 9.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+/**
+ * Lens selector dropdown for switching between available camera lenses
+ */
+@Composable
+private fun LensSelector(
+    availableLenses: List<LensInfo>,
+    currentLens: LensInfo?,
+    onLensSelected: (LensInfo) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        // Current lens button - compact circular design
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier
+                .size(40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+        ) {
+            // Extract zoom level from display name (e.g., "Wide (1x)" -> "1x")
+            val zoomLabel = currentLens?.displayName?.let { name ->
+                val match = Regex("""\(([\d.]+x)\)""").find(name)
+                match?.groupValues?.get(1) ?: "1x"
+            } ?: "1x"
+
+            Text(
+                text = zoomLabel,
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        // Dropdown menu
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color.Black.copy(alpha = 0.9f))
+        ) {
+            availableLenses.forEach { lens ->
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val icon = when (lens.type) {
+                                LensType.ULTRA_WIDE -> Icons.Default.CameraAlt
+                                LensType.WIDE -> Icons.Default.PhotoCamera
+                                LensType.NORMAL -> Icons.Default.PhotoCamera
+                                LensType.TELEPHOTO -> Icons.Default.ZoomIn
+                                LensType.MACRO -> Icons.Default.CenterFocusStrong
+                                LensType.UNKNOWN -> Icons.Default.CameraAlt
+                            }
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = if (currentLens?.id == lens.id) Color.Cyan else Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = lens.displayName,
+                                color = if (currentLens?.id == lens.id) Color.Cyan else Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = if (currentLens?.id == lens.id) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    },
+                    onClick = {
+                        onLensSelected(lens)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }
 

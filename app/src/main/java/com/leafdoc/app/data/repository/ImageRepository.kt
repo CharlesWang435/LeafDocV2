@@ -12,6 +12,8 @@ import androidx.core.content.FileProvider
 import com.leafdoc.app.data.model.ExportSettings
 import com.leafdoc.app.data.model.ImageFormat
 import com.leafdoc.app.data.model.ExportLocation
+import com.leafdoc.app.data.model.LeafSession
+import com.leafdoc.app.data.model.LeafSegment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -210,6 +212,61 @@ class ImageRepository @Inject constructor(
             "${context.packageName}.fileprovider",
             file
         )
+    }
+
+    /**
+     * Exports all segments from a session as individual image files.
+     * Returns list of exported URIs.
+     */
+    suspend fun exportAllSegments(
+        session: LeafSession,
+        segments: List<LeafSegment>,
+        settings: ExportSettings,
+        onProgress: ((current: Int, total: Int) -> Unit)? = null
+    ): List<Uri> = withContext(Dispatchers.IO) {
+        val exportedUris = mutableListOf<Uri>()
+
+        segments.forEachIndexed { index, segment ->
+            onProgress?.invoke(index + 1, segments.size)
+
+            val fileName = buildSegmentFileName(session, segment, settings.format)
+            val uri = exportImage(segment.imagePath, settings, fileName)
+
+            if (uri != null) {
+                exportedUris.add(uri)
+            }
+        }
+
+        exportedUris
+    }
+
+    private fun buildSegmentFileName(
+        session: LeafSession,
+        segment: LeafSegment,
+        format: ImageFormat
+    ): String {
+        val parts = mutableListOf<String>()
+        parts.add("LeafDoc")
+
+        if (session.farmerId.isNotEmpty()) {
+            parts.add(session.farmerId.take(20))
+        }
+        if (session.fieldId.isNotEmpty()) {
+            parts.add(session.fieldId.take(20))
+        }
+        parts.add("Leaf${session.leafNumber}")
+
+        // Add frame label if present
+        if (segment.frameLabel != null) {
+            parts.add(segment.frameLabel.replace(" ", "_"))  // "Frame_3"
+        } else {
+            parts.add("Segment${segment.segmentIndex + 1}")
+        }
+
+        val timestamp = dateFormat.format(Date(segment.capturedAt))
+        parts.add(timestamp)
+
+        return "${parts.joinToString("_")}.${format.extension}"
     }
 
     private fun writeBitmapToStream(

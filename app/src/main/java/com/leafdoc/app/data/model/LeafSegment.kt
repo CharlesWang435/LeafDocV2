@@ -38,5 +38,6 @@ data class LeafSegment(
     val whiteBalance: Int? = null,
     val exposureCompensation: Float? = null,
     val focusDistance: Float? = null,
+    val frameLabel: String? = null,  // e.g., "Frame 3" or null for single-frame sessions
     val overlapPercentage: Float = 0f  // Calculated overlap with previous segment
 )

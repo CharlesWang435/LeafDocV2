@@ -59,7 +59,12 @@ class ProCameraController(
     private val _histogramData = MutableStateFlow<IntArray?>(null)
     val histogramData: StateFlow<IntArray?> = _histogramData.asStateFlow()
 
+    private val _currentLens = MutableStateFlow<LensInfo?>(null)
+    val currentLens: StateFlow<LensInfo?> = _currentLens.asStateFlow()
+
     private var frameAnalyzer: FrameAnalyzer? = null
+    private var lifecycleOwner: LifecycleOwner? = null
+    private var previewView: PreviewView? = null
 
     suspend fun initialize(
         lifecycleOwner: LifecycleOwner,
@@ -69,18 +74,27 @@ class ProCameraController(
         _cameraState.value = CameraState.Initializing
 
         try {
+            this.lifecycleOwner = lifecycleOwner
+            this.previewView = previewView
+
             cameraProvider = getCameraProvider()
             _currentSettings.value = settings
 
-            // Get camera capabilities
+            // Get camera capabilities (includes all available lenses)
             val capabilities = queryCameraCapabilities()
             _cameraCapabilities.value = capabilities
+
+            // Set default lens (main/wide lens)
+            val defaultLens = capabilities.availableLenses.firstOrNull {
+                it.type == LensType.WIDE || it.type == LensType.NORMAL
+            } ?: capabilities.availableLenses.firstOrNull()
+            _currentLens.value = defaultLens
 
             // Build use cases
             buildUseCases(settings)
 
             // Bind to lifecycle
-            bindCamera(lifecycleOwner, previewView)
+            bindCamera(lifecycleOwner, previewView, defaultLens?.id)
 
             // Apply initial settings
             applySettings(settings)
@@ -103,8 +117,137 @@ class ProCameraController(
         }, ContextCompat.getMainExecutor(context))
     }
 
+    private fun createLensInfo(cameraId: String, characteristics: CameraCharacteristics): LensInfo? {
+        val focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS) ?: floatArrayOf()
+        val focalLength = focalLengths.firstOrNull() ?: return null
+
+        // Get sensor size for better lens classification
+        val sensorSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+        val sensorWidth = sensorSize?.width ?: 6.4f // Default to typical phone sensor
+
+        // Calculate 35mm equivalent focal length for better classification
+        // Crop factor = 36mm / sensor width
+        val cropFactor = 36f / sensorWidth
+        val focalLength35mm = focalLength * cropFactor
+
+        // Determine lens type based on 35mm equivalent focal length
+        val lensType = when {
+            focalLength35mm < 18f -> LensType.ULTRA_WIDE  // < 18mm (typically 0.5x-0.6x)
+            focalLength35mm < 28f -> LensType.WIDE       // 18-28mm (typically 0.8x-1x)
+            focalLength35mm < 50f -> LensType.NORMAL     // 28-50mm (typically 1x-1.5x)
+            focalLength35mm < 85f -> LensType.TELEPHOTO  // 50-85mm (typically 2x-3x)
+            else -> LensType.TELEPHOTO                   // > 85mm (typically 5x-10x)
+        }
+
+        // Check if it's a macro lens (minimum focus distance < 10cm)
+        val minFocusDist = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        val isMacro = minFocusDist > 0 && (1f / minFocusDist) < 0.1f
+
+        val finalLensType = if (isMacro) LensType.MACRO else lensType
+
+        // Get zoom ratio if available (API 30+) to determine display multiplier
+        val zoomRatio = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.lower ?: 1.0f
+        } else {
+            // Estimate zoom ratio from focal length
+            when {
+                focalLength35mm < 18f -> 0.6f
+                focalLength35mm < 28f -> 1.0f
+                focalLength35mm < 50f -> 1.0f
+                focalLength35mm < 85f -> when {
+                    focalLength35mm > 70f -> 3.0f
+                    else -> 2.0f
+                }
+                focalLength35mm < 135f -> 5.0f
+                else -> 10.0f
+            }
+        }
+
+        // Create display name based on zoom ratio
+        val displayName = when (finalLensType) {
+            LensType.ULTRA_WIDE -> "Ultra Wide (${zoomRatio}x)"
+            LensType.WIDE -> "Wide (${zoomRatio}x)"
+            LensType.NORMAL -> "Main (${zoomRatio}x)"
+            LensType.TELEPHOTO -> {
+                val roundedZoom = when {
+                    zoomRatio >= 9f -> "10x"
+                    zoomRatio >= 4.5f -> "5x"
+                    zoomRatio >= 2.5f -> "3x"
+                    else -> "2x"
+                }
+                "Telephoto ($roundedZoom)"
+            }
+            LensType.MACRO -> "Macro"
+            LensType.UNKNOWN -> "Camera $cameraId"
+        }
+
+        val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+            ?: CameraCharacteristics.LENS_FACING_BACK
+
+        return LensInfo(
+            id = cameraId,
+            lensFacing = lensFacing,
+            type = finalLensType,
+            focalLength = focalLength,
+            physicalSize = sensorSize,
+            zoomRatio = zoomRatio,
+            displayName = displayName
+        )
+    }
+
     private fun queryCameraCapabilities(): CameraCapabilities {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+
+        // Find all back-facing cameras (including physical cameras)
+        val availableLenses = mutableListOf<LensInfo>()
+        val addedCameraIds = mutableSetOf<String>() // Track added cameras to avoid duplicates
+
+        for (cameraId in cameraManager.cameraIdList) {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+
+            // Only include back-facing cameras
+            if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) {
+                // Get physical camera IDs (API 28+)
+                val physicalCameras = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    characteristics.physicalCameraIds
+                } else {
+                    emptySet()
+                }
+
+                // Process physical cameras if available
+                if (physicalCameras.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    for (physicalId in physicalCameras) {
+                        if (addedCameraIds.contains(physicalId)) continue
+
+                        try {
+                            val physicalChars = cameraManager.getCameraCharacteristics(physicalId)
+                            val lensInfo = createLensInfo(physicalId, physicalChars)
+                            if (lensInfo != null) {
+                                availableLenses.add(lensInfo)
+                                addedCameraIds.add(physicalId)
+                            }
+                        } catch (e: Exception) {
+                            // Physical camera might not be accessible directly
+                        }
+                    }
+                }
+
+                // Also add the logical camera if not already added via physical cameras
+                if (!addedCameraIds.contains(cameraId)) {
+                    val lensInfo = createLensInfo(cameraId, characteristics)
+                    if (lensInfo != null) {
+                        availableLenses.add(lensInfo)
+                        addedCameraIds.add(cameraId)
+                    }
+                }
+            }
+        }
+
+        // Sort lenses by focal length (ultra-wide -> wide -> telephoto)
+        availableLenses.sortBy { it.focalLength }
+
+        // Use the first back-facing camera as primary for capability detection
         val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
             val characteristics = cameraManager.getCameraCharacteristics(id)
             characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
@@ -155,7 +298,8 @@ class ProCameraController(
             exposureCompensationStep = exposureCompensationStep,
             hasFlash = hasFlash,
             focalLengths = focalLengths.toList(),
-            apertures = apertures.toList()
+            apertures = apertures.toList(),
+            availableLenses = availableLenses
         )
     }
 
@@ -164,20 +308,32 @@ class ProCameraController(
         preview = Preview.Builder()
             .build()
 
-        // Image Capture
+        // Image Capture - Enhanced for maximum quality
+        val capabilities = _cameraCapabilities.value
+        val maxResolution = capabilities?.availableResolutions?.maxByOrNull { it.width * it.height }
+
         val targetResolution = when (settings.resolution) {
-            ResolutionMode.FULL -> null  // Max available
-            ResolutionMode.HIGH -> Size(4000, 3000)
-            ResolutionMode.MEDIUM -> Size(3264, 2448)
+            ResolutionMode.FULL -> maxResolution  // Use device's maximum resolution
+            ResolutionMode.HIGH -> maxResolution?.let { Size(it.width * 3 / 4, it.height * 3 / 4) } ?: Size(4000, 3000)
+            ResolutionMode.MEDIUM -> maxResolution?.let { Size(it.width / 2, it.height / 2) } ?: Size(3264, 2448)
             ResolutionMode.LOW -> Size(2048, 1536)
         }
 
         val imageCaptureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setJpegQuality(100)
 
-        targetResolution?.let {
-            imageCaptureBuilder.setTargetResolution(it)
+        // Configure format - always capture as JPEG, then convert to 16-bit PNG if needed
+        // CameraX doesn't support RAW directly, so we capture JPEG at max quality
+        // and convert to 16-bit PNG for extended dynamic range
+        imageCaptureBuilder
+            .setJpegQuality(100)  // Maximum JPEG quality
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+
+        // Set target resolution for non-FULL modes
+        if (settings.resolution != ResolutionMode.FULL) {
+            targetResolution?.let {
+                imageCaptureBuilder.setTargetResolution(it)
+            }
         }
 
         imageCapture = imageCaptureBuilder.build()
@@ -196,12 +352,25 @@ class ProCameraController(
             }
     }
 
-    private fun bindCamera(lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
+    private fun bindCamera(lifecycleOwner: LifecycleOwner, previewView: PreviewView, cameraId: String? = null) {
         cameraProvider?.unbindAll()
 
-        val cameraSelector = CameraSelector.Builder()
-            .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-            .build()
+        val cameraSelector = if (cameraId != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            // Use specific camera by ID (for multi-lens support)
+            CameraSelector.Builder()
+                .addCameraFilter { cameras ->
+                    cameras.filter { cameraInfo ->
+                        val info = Camera2CameraInfo.from(cameraInfo)
+                        info.cameraId == cameraId
+                    }
+                }
+                .build()
+        } else {
+            // Default to back camera
+            CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                .build()
+        }
 
         camera = cameraProvider?.bindToLifecycle(
             lifecycleOwner,
@@ -212,6 +381,20 @@ class ProCameraController(
         )
 
         preview?.setSurfaceProvider(previewView.surfaceProvider)
+    }
+
+    /**
+     * Switch to a different lens/camera
+     */
+    fun switchLens(lensInfo: LensInfo) {
+        val owner = lifecycleOwner ?: return
+        val view = previewView ?: return
+
+        _currentLens.value = lensInfo
+        bindCamera(owner, view, lensInfo.id)
+
+        // Reapply current settings to new camera
+        applySettings(_currentSettings.value)
     }
 
     fun applySettings(settings: CameraSettings) {
@@ -398,7 +581,8 @@ class ProCameraController(
                             shutterSpeed = if (settings.shutterSpeed != CameraSettings.SHUTTER_AUTO) settings.shutterSpeed else null,
                             focusDistance = if (settings.focusDistance != CameraSettings.FOCUS_AUTO) settings.focusDistance else null,
                             whiteBalance = settings.whiteBalance,
-                            exposureCompensation = settings.exposureCompensation
+                            exposureCompensation = settings.exposureCompensation,
+                            captureFormat = settings.captureFormat
                         )
 
                         _cameraState.value = CameraState.Ready
@@ -463,8 +647,28 @@ data class CameraCapabilities(
     val exposureCompensationStep: Float,
     val hasFlash: Boolean,
     val focalLengths: List<Float>,
-    val apertures: List<Float>
+    val apertures: List<Float>,
+    val availableLenses: List<LensInfo> = emptyList()
 )
+
+data class LensInfo(
+    val id: String,
+    val lensFacing: Int,
+    val type: LensType,
+    val focalLength: Float,
+    val physicalSize: android.util.SizeF?,
+    val zoomRatio: Float,
+    val displayName: String
+)
+
+enum class LensType {
+    ULTRA_WIDE,  // < 18mm equivalent
+    WIDE,        // 18-35mm equivalent
+    NORMAL,      // 35-70mm equivalent
+    TELEPHOTO,   // > 70mm equivalent
+    MACRO,       // Close-up lens
+    UNKNOWN
+}
 
 data class CapturedImage(
     val bitmap: Bitmap,
@@ -475,7 +679,8 @@ data class CapturedImage(
     val shutterSpeed: Long?,
     val focusDistance: Float?,
     val whiteBalance: WhiteBalanceMode,
-    val exposureCompensation: Float
+    val exposureCompensation: Float,
+    val captureFormat: CaptureFormat
 )
 
 data class ExposureInfo(

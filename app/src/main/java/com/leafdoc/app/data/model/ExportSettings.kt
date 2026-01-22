@@ -7,7 +7,8 @@ data class ExportSettings(
     val format: ImageFormat = ImageFormat.JPEG,
     val quality: Int = 95,  // 0-100 for JPEG
     val includeMetadata: Boolean = true,
-    val exportLocation: ExportLocation = ExportLocation.PICTURES_FOLDER
+    val exportLocation: ExportLocation = ExportLocation.PICTURES_FOLDER,
+    val exportMode: ExportMode = ExportMode.STITCHED_ONLY
 )
 
 enum class ImageFormat(
@@ -26,4 +27,10 @@ enum class ExportLocation(val displayName: String) {
     DOCUMENTS_FOLDER("Documents/LeafDoc"),
     DOWNLOADS_FOLDER("Downloads/LeafDoc"),
     CUSTOM("Custom Location")
+}
+
+enum class ExportMode(val displayName: String) {
+    STITCHED_ONLY("Stitched Image Only"),
+    FRAMES_ONLY("Individual Frames Only"),
+    BOTH("Both Stitched and Frames")
 }

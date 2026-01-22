@@ -11,6 +11,7 @@ data class CameraSettings(
     val exposureCompensation: Float = 0f,
     val resolution: ResolutionMode = ResolutionMode.FULL,
     val flashMode: FlashMode = FlashMode.OFF,
+    val captureFormat: CaptureFormat = CaptureFormat.JPEG,
     val gridOverlay: GridOverlayType = GridOverlayType.THIRDS,
     val showHistogram: Boolean = true,
     val showFocusPeaking: Boolean = false,
@@ -90,4 +91,9 @@ enum class GridOverlayType(val displayName: String) {
     GOLDEN("Golden Ratio"),
     CENTER("Center Cross"),
     GRID_4X4("4x4 Grid")
+}
+
+enum class CaptureFormat(val displayName: String, val fileExtension: String, val bitDepth: Int) {
+    JPEG("JPEG (8-bit)", "jpg", 8),
+    PNG_16("PNG (16-bit)", "png", 16)
 }

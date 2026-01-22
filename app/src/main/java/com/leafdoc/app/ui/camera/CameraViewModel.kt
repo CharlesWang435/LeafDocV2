@@ -84,6 +84,9 @@ class CameraViewModel @Inject constructor(
     private val _cropRectLocked = MutableStateFlow(false)
     val cropRectLocked: StateFlow<Boolean> = _cropRectLocked.asStateFlow()
 
+    private val _cropRectEnabled = MutableStateFlow(true)
+    val cropRectEnabled: StateFlow<Boolean> = _cropRectEnabled.asStateFlow()
+
     // Preview dimensions for accurate crop mapping
     private var previewWidth: Int = 0
     private var previewHeight: Int = 0
@@ -121,6 +124,11 @@ class CameraViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesManager.cropRectLocked.collect { locked ->
                 _cropRectLocked.value = locked
+            }
+        }
+        viewModelScope.launch {
+            preferencesManager.cropRectEnabled.collect { enabled ->
+                _cropRectEnabled.value = enabled
             }
         }
     }
@@ -179,9 +187,16 @@ class CameraViewModel @Inject constructor(
             try {
                 val segmentIndex = _capturedSegments.value.size
 
-                // Crop the captured image according to the crop rectangle
-                val currentCropRect = _cropRect.value
-                croppedBitmap = cropBitmap(capturedImage.bitmap, currentCropRect)
+                // Crop the captured image according to the crop rectangle (if enabled)
+                // When disabled, use the full captured bitmap without any modifications
+                croppedBitmap = if (_cropRectEnabled.value) {
+                    val currentCropRect = _cropRect.value
+                    cropBitmap(capturedImage.bitmap, currentCropRect)
+                } else {
+                    // Use the entire captured image without any cropping at all
+                    // Just create a copy to maintain consistent memory management
+                    capturedImage.bitmap.copy(capturedImage.bitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                }
 
                 // Save cropped image to storage
                 imagePath = imageRepository.saveSegmentImage(
@@ -196,6 +211,10 @@ class CameraViewModel @Inject constructor(
                 // Use fixed overlap percentage from settings (no auto-calculation)
                 val overlap = overlapPercentage.value / 100f
 
+                // Determine if this is a multi-frame session (more than 1 segment expected)
+                // User typically captures multiple frames, so default to true
+                val isMultiFrame = _capturedSegments.value.size > 0 || segmentIndex > 0
+
                 // Add segment to database
                 val segment = sessionRepository.addSegment(
                     sessionId = session.id,
@@ -208,7 +227,8 @@ class CameraViewModel @Inject constructor(
                     focusDistance = capturedImage.focusDistance,
                     whiteBalance = capturedImage.whiteBalance.temperature,
                     exposureCompensation = capturedImage.exposureCompensation,
-                    overlapPercentage = overlap
+                    overlapPercentage = overlap,
+                    isMultiFrameSession = isMultiFrame
                 )
 
                 // Update captured segments list
@@ -258,6 +278,11 @@ class CameraViewModel @Inject constructor(
      * With FILL_CENTER:
      * - If image is wider than screen: sides of image are cropped, full height visible
      * - If image is taller than screen: top/bottom of image are cropped, full width visible
+     *
+     * Key insight: The cropRect values (0-1) represent fractions of the VISIBLE preview area,
+     * not the full captured image. We need to:
+     * 1. Determine which portion of the full image is visible in the preview
+     * 2. Map the crop rectangle (which is relative to this visible portion) to absolute image coordinates
      */
     private fun cropBitmap(source: Bitmap, cropRect: CropRect): Bitmap {
         // The captured image dimensions
@@ -273,30 +298,41 @@ class CameraViewModel @Inject constructor(
         }
 
         // Calculate what portion of the image is visible in FILL_CENTER mode
+        // The visible region is what the user sees in the preview
         val visibleLeft: Float
         val visibleTop: Float
         val visibleWidth: Float
         val visibleHeight: Float
 
         if (imageAspect > screenAspect) {
-            // Image is wider than screen - sides are cropped
+            // Image is wider than screen - sides are cropped from view
+            // Full height is visible, but width is scaled down to fit screen
             visibleHeight = imageHeight
             visibleWidth = imageHeight * screenAspect
             visibleLeft = (imageWidth - visibleWidth) / 2f
             visibleTop = 0f
         } else {
-            // Image is taller than screen - top/bottom are cropped
+            // Image is taller than screen - top/bottom are cropped from view
+            // Full width is visible, but height is scaled down to fit screen
             visibleWidth = imageWidth
             visibleHeight = imageWidth / screenAspect
             visibleLeft = 0f
             visibleTop = (imageHeight - visibleHeight) / 2f
         }
 
-        // Map the crop rectangle from preview coordinates to image coordinates
-        val left = (visibleLeft + visibleWidth * cropRect.left).toInt().coerceIn(0, source.width - 1)
-        val top = (visibleTop + visibleHeight * cropRect.top).toInt().coerceIn(0, source.height - 1)
-        val right = (visibleLeft + visibleWidth * cropRect.right).toInt().coerceIn(left + 1, source.width)
-        val bottom = (visibleTop + visibleHeight * cropRect.bottom).toInt().coerceIn(top + 1, source.height)
+        // Now map the crop rectangle coordinates from the visible region to absolute image coordinates
+        // cropRect values are fractions (0-1) relative to the visible region
+        // We need to convert them to pixel coordinates in the full image
+        val cropLeft = visibleLeft + (cropRect.left * visibleWidth)
+        val cropTop = visibleTop + (cropRect.top * visibleHeight)
+        val cropRight = visibleLeft + (cropRect.right * visibleWidth)
+        val cropBottom = visibleTop + (cropRect.bottom * visibleHeight)
+
+        // Ensure coordinates are within bounds and valid
+        val left = cropLeft.toInt().coerceIn(0, source.width - 1)
+        val top = cropTop.toInt().coerceIn(0, source.height - 1)
+        val right = cropRight.toInt().coerceIn(left + 1, source.width)
+        val bottom = cropBottom.toInt().coerceIn(top + 1, source.height)
 
         val width = right - left
         val height = bottom - top
@@ -371,6 +407,9 @@ class CameraViewModel @Inject constructor(
         )}
 
         try {
+            // Clear frame labels for single-segment sessions (user preference)
+            clearFrameLabelsForSingleSegment(session.id)
+
             // Load the single segment
             val bitmap = imageRepository.loadBitmap(segment.imagePath)
                 ?: throw Exception("Failed to load segment image")
@@ -400,6 +439,17 @@ class CameraViewModel @Inject constructor(
                 isStitching = false,
                 error = "Failed to save image: ${e.message}"
             )}
+        }
+    }
+
+    /**
+     * Clears frame labels for single-segment sessions (user preference).
+     */
+    private suspend fun clearFrameLabelsForSingleSegment(sessionId: String) {
+        val segments = sessionRepository.getSegmentsBySessionSync(sessionId)
+        if (segments.size == 1) {
+            // Update the single segment to have null frameLabel
+            sessionRepository.updateSegment(segments[0].copy(frameLabel = null))
         }
     }
 
@@ -685,6 +735,14 @@ class CameraViewModel @Inject constructor(
         _cropRectLocked.value = newLocked
         viewModelScope.launch {
             preferencesManager.updateCropRectLocked(newLocked)
+        }
+    }
+
+    fun toggleCropRectEnabled() {
+        val newEnabled = !_cropRectEnabled.value
+        _cropRectEnabled.value = newEnabled
+        viewModelScope.launch {
+            preferencesManager.updateCropRectEnabled(newEnabled)
         }
     }
 
