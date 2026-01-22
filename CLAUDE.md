@@ -62,29 +62,37 @@ com.leafdoc.app/
 
 3. **Diagnosis Flow**: `ResultsViewModel.analyzeDiagnosis()` → `DiagnosisRepository` → `GeminiAiService` (Google Gemini API) → parses response → updates Room
 
-4. **Viewing Flow**: `GalleryScreen` (grid view) → tap image → `ZoomableImageDialog` (fullscreen preview with pinch-to-zoom) → "View Results & Diagnosis" button → `ResultsScreen` (diagnosis details, export options)
+4. **Export Flow**: `ResultsScreen` → User selects export mode (Stitched Only / Frames Only / Both) → `ResultsViewModel.exportWithMode()` → `ImageRepository.exportAllSegments()` with progress callbacks → exports to MediaStore → displays share option for multiple images
+
+5. **Viewing Flow**: `GalleryScreen` (grid view) → tap image → `ZoomableImageDialog` (fullscreen preview with pinch-to-zoom) → "View Results & Diagnosis" button → `ResultsScreen` (stitched image at top, individual frames directly underneath with zoom support, followed by diagnosis details and export options). Individual frames are displayed in `IndividualFramesCard` with `ClickableZoomableImage` thumbnails that support pinch-to-zoom and double-tap-to-zoom gestures for detailed frame inspection.
 
 ### Critical Components
 
-- **ProCameraController** (`camera/`): Wraps CameraX with Camera2 interop for manual ISO, shutter speed, focus distance, white balance control. Uses `CaptureRequestOptions` to override auto settings.
+- **ProCameraController** (`camera/`): Wraps CameraX with Camera2 interop for manual ISO, shutter speed, focus distance, white balance control. Uses `CaptureRequestOptions` to override auto settings. **Multi-Lens Support**: Automatically detects all available back-facing camera lenses (ultra-wide, wide, telephoto, macro) and provides `switchLens()` function for runtime lens switching. Lens types are determined by focal length and minimum focus distance characteristics.
 
 - **SimpleStitcher** (`stitching/`): Horizontal concatenation with configurable overlap blending. Segments are stitched left-to-right (base to tip) with linear gradient blending. Optionally uses `MidribAligner` to correct vertical drift between segments.
 
 - **MidribAligner** (`stitching/`): Detects corn leaf midrib (central vein) using green channel dominance analysis. In transmittance imaging, the midrib has distinct green channel characteristics. Uses sliding window to find the horizontal band with highest green dominance ratio (`green / (red + green + blue)`). Calculates vertical offsets to align all segments to the same Y position, correcting for hand movement during capture.
 
-- **CropRectangleOverlay** (`ui/camera/`): Draggable/resizable crop rectangle overlay. Users define the capture region to match their light board. Supports lock/unlock to freeze position. Captured images are cropped to this region before stitching.
+- **CropRectangleOverlay** (`ui/camera/`): Draggable/resizable crop rectangle overlay. Users define the capture region to match their light board. Supports lock/unlock to freeze position and enable/disable toggle to capture full frame without cropping. Captured images are cropped to this region before stitching (when enabled).
 
 - **MidribGuideOverlay** (`ui/camera/`): Horizontal guide band with light green gradient appearance to help users align the leaf midrib during capture. Supports drag-to-move and edge handles for adjustable thickness. Uses local state during drag operations for smooth gesture handling. Position and thickness persist via DataStore preferences.
 
-- **Crop Coordinate Mapping**: The camera preview uses `FILL_CENTER` scaling, which may crop the image differently than the preview shows. `CameraViewModel.cropBitmap()` calculates the visible region based on aspect ratio differences between the captured image and preview, then maps the crop rectangle coordinates accordingly for accurate cropping.
+- **Crop Coordinate Mapping**: The camera preview uses `FILL_CENTER` scaling, which displays a portion of the full captured image to fill the screen. The captured image itself is always the full sensor output (using `HIGHEST_AVAILABLE_STRATEGY` resolution selector). When crop rectangle is **enabled**, `CameraViewModel.cropBitmap()` calculates the visible region based on aspect ratio differences between the captured image and preview, then maps the crop rectangle coordinates accordingly for accurate cropping. When crop rectangle is **disabled**, the full captured image is saved without any cropping.
 
-- **ManualAlignmentScreen** (`ui/camera/`): Fullscreen dialog for manual Y-axis alignment before stitching. Shows live preview synchronized with segment thumbnails, +/- buttons to adjust each segment's vertical offset (±500px range), and "Auto Align" button that applies `MidribAligner` detection as a starting point. Available both during capture flow and from `ResultsScreen` for re-alignment of saved sessions.
+- **ManualAlignmentScreen** (`ui/camera/`): Fullscreen dialog for manual Y-axis alignment before stitching. Shows live preview synchronized with segment thumbnails, +/- buttons to adjust each segment's vertical offset (±500px range), and "Auto Align" button that applies `MidribAligner` detection as a starting point. Available both during capture flow and from `ResultsScreen` for re-alignment of saved sessions. Segment thumbnails are clickable to open `FullscreenSegmentViewer` with horizontal swipe navigation between frames.
+
+- **Image Quality**: Camera captures at device's maximum native resolution using `ResolutionSelector` with `HIGHEST_AVAILABLE_STRATEGY`, ensuring the full sensor output is captured without aspect ratio cropping. JPEG quality is set to 100 for maximum detail. This ensures high-quality scientific imaging suitable for disease analysis. The captured images are always the full sensor output, regardless of what's visible in the preview (which uses `FILL_CENTER` scaling).
 
 ### Database Schema
 
 Two Room entities with a one-to-many relationship:
 - `LeafSession`: Captures metadata (farmer ID, field ID, GPS, diagnosis status, stitched image path)
-- `LeafSegment`: Individual captured frames with camera EXIF data, linked to session via `sessionId`
+- `LeafSegment`: Individual captured frames with camera EXIF data, linked to session via `sessionId`. Includes `frameLabel` field for individual frame exports (e.g., "Frame 3")
+
+**Current database version: 2** (see `LeafDocDatabase.kt`)
+
+Database migrations are in `LeafDocDatabase.ALL_MIGRATIONS`. The most recent migration (v1→v2) adds the `frameLabel` column for individual frame export functionality.
 
 ### DiagnosisDisplay Model
 
@@ -167,14 +175,42 @@ Timber.e(exception, "Error occurred")
 - Target SDK 35, Min SDK 26
 - Gradle 8.9
 
+## Export System
+
+The app supports three export modes via `ExportMode` enum:
+- **STITCHED_ONLY**: Exports only the stitched panorama
+- **FRAMES_ONLY**: Exports individual captured frames with frame labels
+- **BOTH**: Exports both stitched image and all individual frames
+
+### Frame Labeling Strategy
+
+Frame labels are generated during capture:
+- First frame: `frameLabel = null` (might be single-frame session)
+- Subsequent frames: `frameLabel = "Frame 2"`, `"Frame 3"`, etc.
+- Single-frame sessions: `frameLabel` cleared to NULL in `CameraViewModel.finishWithSingleSegment()`
+
+File naming format: `LeafDoc_{FarmerId}_{FieldId}_Leaf{N}_{FrameLabel}_{timestamp}.{ext}`
+
+Export progress is tracked with callbacks (`onProgress: (current, total) -> Unit`) and displayed in UI with `LinearProgressIndicator`.
+
 ## Database Migrations
 
 Room migrations are defined in `LeafDocDatabase.ALL_MIGRATIONS`. When modifying the schema:
-1. Increment the database version
-2. Add a migration object to the companion object
+1. Increment the database version in `@Database` annotation
+2. Create a migration object in the companion object (e.g., `MIGRATION_X_Y`)
 3. Add it to the `ALL_MIGRATIONS` array
+4. Use `database.execSQL()` for schema changes
 
 The database is configured in `DatabaseModule` with `.addMigrations(*LeafDocDatabase.ALL_MIGRATIONS)`.
+
+**Example migration** (v1→v2):
+```kotlin
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE leaf_segments ADD COLUMN frameLabel TEXT DEFAULT NULL")
+    }
+}
+```
 
 ## Stitching Algorithm
 
@@ -219,7 +255,36 @@ Controls expand inline when tapped, minimizing screen obstruction.
 
 ### Lock Controls Panel
 
-Horizontal panel in top bar for locking overlays:
-- Crop rectangle lock toggle
-- Midrib guide lock toggle
+Horizontal panel in top bar for managing overlays:
+- Crop rectangle enable/disable toggle
+- Crop rectangle lock toggle (only shown when crop is enabled)
+- Midrib guide visibility toggle
+- Midrib guide lock toggle (only shown when guide is enabled)
+- Midrib auto-alignment toggle
 - Expands/collapses with arrow button
+
+### Lens Selector
+
+Dropdown menu in top bar for switching camera lenses:
+- Automatically detects all available back-facing lenses
+- Displays lens type icons (Ultra Wide, Wide, Telephoto, Macro)
+- Only shown when device has multiple camera lenses
+- Current lens highlighted in cyan
+- Supports runtime lens switching without restarting camera
+
+### Fullscreen Viewers
+
+**FullscreenSegmentViewer** (in ManualAlignmentScreen):
+- View bitmaps in memory during alignment
+- Horizontal pager for swipe navigation
+- Page indicators at bottom
+- Used for inspecting segments before stitching
+
+**ResultsScreen Individual Frames**:
+- Individual frames displayed in horizontal scrolling row directly under stitched image
+- Each thumbnail uses `ClickableZoomableImage` for tap-to-zoom with pinch and double-tap gestures
+- Thumbnails show frame labels and zoom hint icon
+- Larger 120dp thumbnails for better preview
+- Fullscreen zoom viewer opens with pinch-to-zoom, drag-to-pan, and double-tap-to-zoom support
+
+The FullscreenSegmentViewer in ManualAlignmentScreen uses `androidx.compose.foundation.pager.HorizontalPager` with `@OptIn(ExperimentalFoundationApi::class)` and displays against black background for professional image inspection.

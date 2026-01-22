@@ -6,12 +6,16 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -55,6 +59,8 @@ fun ManualAlignmentScreen(
     var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isGeneratingPreview by remember { mutableStateOf(false) }
     var isAutoAligning by remember { mutableStateOf(false) }
+    var showFullscreenViewer by remember { mutableStateOf(false) }
+    var selectedSegmentIndex by remember { mutableIntStateOf(0) }
 
     val coroutineScope = rememberCoroutineScope()
     var previewJob by remember { mutableStateOf<Job?>(null) }
@@ -240,6 +246,10 @@ fun ManualAlignmentScreen(
                                     onOffsetChange = { newOffset ->
                                         offsets[index] = newOffset
                                         updatePreview()
+                                    },
+                                    onThumbnailClick = {
+                                        selectedSegmentIndex = index
+                                        showFullscreenViewer = true
                                     }
                                 )
                             }
@@ -295,6 +305,15 @@ fun ManualAlignmentScreen(
             }
         }
     }
+
+    // Fullscreen Segment Viewer
+    if (showFullscreenViewer) {
+        FullscreenSegmentViewer(
+            segments = segments,
+            initialPage = selectedSegmentIndex,
+            onDismiss = { showFullscreenViewer = false }
+        )
+    }
 }
 
 @Composable
@@ -302,7 +321,8 @@ private fun SegmentAdjustmentItem(
     bitmap: Bitmap,
     index: Int,
     offset: Int,
-    onOffsetChange: (Int) -> Unit
+    onOffsetChange: (Int) -> Unit,
+    onThumbnailClick: () -> Unit = {}
 ) {
     val stepSize = 10 // Pixels per button press
     val maxOffset = 500 // Increased range
@@ -325,12 +345,13 @@ private fun SegmentAdjustmentItem(
 
             Spacer(Modifier.height(6.dp))
 
-            // Thumbnail
+            // Thumbnail (clickable)
             Box(
                 modifier = Modifier
                     .size(70.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color.Black)
+                    .clickable { onThumbnailClick() }
             ) {
                 if (!bitmap.isRecycled) {
                     Image(
@@ -384,6 +405,108 @@ private fun SegmentAdjustmentItem(
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(Icons.Default.Add, "Shift down", Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Fullscreen viewer for examining individual segments in detail with swipe navigation.
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun FullscreenSegmentViewer(
+    segments: List<Bitmap>,
+    initialPage: Int = 0,
+    onDismiss: () -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialPage) { segments.size }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color.Black
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Horizontal Pager for swipe navigation
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val bitmap = segments[page]
+                        if (!bitmap.isRecycled) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Segment ${page + 1}",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+                }
+
+                // Top bar with close button and page indicator
+                TopAppBar(
+                    title = {
+                        Text(
+                            "Frame ${pagerState.currentPage + 1} of ${segments.size}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Black.copy(alpha = 0.7f)
+                    ),
+                    modifier = Modifier.statusBarsPadding()
+                )
+
+                // Page indicator at bottom
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 32.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    repeat(segments.size) { index ->
+                        Box(
+                            modifier = Modifier
+                                .size(
+                                    width = if (index == pagerState.currentPage) 24.dp else 8.dp,
+                                    height = 8.dp
+                                )
+                                .clip(CircleShape)
+                                .background(
+                                    if (index == pagerState.currentPage)
+                                        Color.White
+                                    else
+                                        Color.White.copy(alpha = 0.5f)
+                                )
+                        )
+                    }
                 }
             }
         }

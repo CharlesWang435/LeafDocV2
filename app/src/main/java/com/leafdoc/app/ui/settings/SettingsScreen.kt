@@ -231,6 +231,17 @@ fun SettingsScreen(
                     icon = Icons.Default.Image
                 )
 
+                // Export Mode
+                SettingsDropdown(
+                    label = "Default Export Mode",
+                    value = exportSettings.exportMode.displayName,
+                    options = ExportMode.entries.map { it.displayName },
+                    onSelect = { index ->
+                        viewModel.updateExportMode(ExportMode.entries[index])
+                    },
+                    icon = Icons.Default.PhotoLibrary
+                )
+
                 // Quality (for JPEG)
                 if (exportSettings.format.supportsQuality) {
                     SettingsSlider(

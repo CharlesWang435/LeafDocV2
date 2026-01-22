@@ -25,7 +25,16 @@
       "Bash(powershell.exe -ExecutionPolicy Bypass -File \"c:\\Users\\wangc\\Downloads\\LeafDocV2\\temp_create_icons.ps1\")",
       "Bash(git log:*)",
       "WebFetch(domain:github.com)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(dir /s /b \"C:\\Users\\wangc\\Downloads\\LeafDocV2\\*Report*\")",
+      "Bash(pandoc:*)",
+      "Bash(pip install:*)",
+      "Bash(python convert_to_docx.py:*)",
+      "Bash(dir \"C:\\Users\\wangc\\Downloads\\LeafDocV2\\LeafDoc_Senior_Design_Report.docx\")",
+      "Bash(python create_timeline.py:*)",
+      "Bash(dir nul:*)",
+      "Bash(rm:*)",
+      "Bash(git archive:*)"
     ],
     "deny": [],
     "ask": []

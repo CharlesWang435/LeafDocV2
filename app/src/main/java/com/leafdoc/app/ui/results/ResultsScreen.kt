@@ -3,8 +3,12 @@ package com.leafdoc.app.ui.results
 import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -121,6 +125,18 @@ fun ResultsScreen(
                         .padding(16.dp)
                 )
 
+                // Individual Frames Section (only show if multiple segments) - MOVED HERE
+                if (segments.size > 1) {
+                    IndividualFramesCard(
+                        segments = segments,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 // Edit Alignment Card (only show if multiple segments)
                 if (segments.size > 1) {
                     EditAlignmentCard(
@@ -161,9 +177,12 @@ fun ResultsScreen(
 
                 // Export Section
                 ExportCard(
+                    session = session!!,
+                    segments = segments,
                     settings = exportSettings,
-                    isExporting = uiState.isExporting,
-                    onExport = { showExportDialog = true },
+                    uiState = uiState,
+                    onExportClick = { showExportDialog = true },
+                    onShareClick = { viewModel.shareMultipleImages() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
@@ -175,16 +194,37 @@ fun ResultsScreen(
     }
 
     // Export Dialog
-    if (showExportDialog) {
+    if (showExportDialog && session != null) {
         ExportDialog(
-            currentFormat = exportSettings.format,
-            currentQuality = exportSettings.quality,
+            session = session!!,
+            segments = segments,
+            currentSettings = exportSettings,
             onDismiss = { showExportDialog = false },
-            onExport = { format ->
-                viewModel.exportImage(format)
+            onExport = { mode, format ->
+                viewModel.exportWithMode(mode, format)
                 showExportDialog = false
             }
         )
+    }
+
+    // Share Intent for multiple images
+    LaunchedEffect(uiState.shareUris) {
+        val uris = uiState.shareUris
+        if (uris != null && uris.isNotEmpty()) {
+            val shareIntent = Intent().apply {
+                if (uris.size == 1) {
+                    action = Intent.ACTION_SEND
+                    putExtra(Intent.EXTRA_STREAM, uris[0])
+                } else {
+                    action = Intent.ACTION_SEND_MULTIPLE
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                }
+                type = "image/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share images"))
+            viewModel.clearShareUris()
+        }
     }
 
     // Delete Confirmation
@@ -640,16 +680,97 @@ private fun HealthScoreIndicator(
 }
 
 @Composable
-private fun ExportCard(
-    settings: ExportSettings,
-    isExporting: Boolean,
-    onExport: () -> Unit,
+private fun IndividualFramesCard(
+    segments: List<LeafSegment>,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Export Image",
+                text = "Individual Frames",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "${segments.size} captured frames - tap to zoom",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(segments) { segment ->
+                    val index = segments.indexOf(segment)
+                    Box(
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        // Use ClickableZoomableImage for zoom support
+                        ClickableZoomableImage(
+                            imagePath = segment.imagePath,
+                            contentDescription = "Frame ${index + 1}",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+
+                        // Frame label overlay
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(4.dp),
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color.Black.copy(alpha = 0.7f)
+                        ) {
+                            Text(
+                                text = segment.frameLabel ?: "Frame ${index + 1}",
+                                fontSize = 10.sp,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        // Zoom hint overlay (subtle)
+                        Icon(
+                            imageVector = Icons.Default.ZoomIn,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(4.dp)
+                                .size(16.dp),
+                            tint = Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Fullscreen viewer for individual frames - removed since ClickableZoomableImage now handles this
+}
+
+@Composable
+private fun ExportCard(
+    session: LeafSession,
+    segments: List<LeafSegment>,
+    settings: ExportSettings,
+    uiState: ResultsUiState,
+    onExportClick: () -> Unit,
+    onShareClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Export",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -670,31 +791,78 @@ private fun ExportCard(
                 )
             }
 
-            if (settings.format.supportsQuality) {
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Export Mode",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = settings.exportMode.displayName,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            if (settings.exportMode != ExportMode.STITCHED_ONLY && segments.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Quality",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${settings.quality}%",
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                Text(
+                    text = "Frames: ${segments.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Progress indicator
+            if (uiState.isExporting && uiState.exportProgress != null) {
+                val (current, total) = uiState.exportProgress
+                LinearProgressIndicator(
+                    progress = { current.toFloat() / total },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Exporting frame $current of $total...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Success message with share button
+            uiState.message?.let { msg ->
+                Text(
+                    text = msg,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (uiState.exportedUris.isNotEmpty()) {
+                    Button(
+                        onClick = onShareClick,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Share ${uiState.exportedUris.size} Image${if (uiState.exportedUris.size != 1) "s" else ""}")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+
+            // Export button
             Button(
-                onClick = onExport,
-                enabled = !isExporting,
+                onClick = onExportClick,
+                enabled = !uiState.isExporting,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (isExporting) {
+                if (uiState.isExporting) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         color = MaterialTheme.colorScheme.onPrimary,
@@ -705,7 +873,7 @@ private fun ExportCard(
                 } else {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Export to Gallery")
+                    Text("Export Images")
                 }
             }
         }
@@ -714,45 +882,85 @@ private fun ExportCard(
 
 @Composable
 private fun ExportDialog(
-    currentFormat: ImageFormat,
-    currentQuality: Int,
+    session: LeafSession,
+    segments: List<LeafSegment>,
+    currentSettings: ExportSettings,
     onDismiss: () -> Unit,
-    onExport: (ImageFormat) -> Unit
+    onExport: (ExportMode, ImageFormat) -> Unit
 ) {
-    var selectedFormat by remember { mutableStateOf(currentFormat) }
+    var selectedFormat by remember { mutableStateOf(currentSettings.format) }
+    var selectedMode by remember { mutableStateOf(currentSettings.exportMode) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Export Options") },
+        title = { Text("Export Images") },
         text = {
-            Column {
-                Text(
-                    text = "Select format:",
-                    style = MaterialTheme.typography.labelMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Export Mode Section
+                Text("Export Mode", style = MaterialTheme.typography.titleSmall)
+
+                ExportMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = (mode == selectedMode),
+                                onClick = { selectedMode = mode }
+                            )
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (mode == selectedMode),
+                            onClick = { selectedMode = mode }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(mode.displayName)
+                    }
+                }
+
+                // Frame count info
+                if (segments.isNotEmpty()) {
+                    Text(
+                        text = "This session has ${segments.size} captured frame${if (segments.size != 1) "s" else ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                HorizontalDivider()
+
+                // Format Section
+                Text("Format", style = MaterialTheme.typography.titleSmall)
 
                 ImageFormat.entries.forEach { format ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .selectable(
+                                selected = (format == selectedFormat),
+                                onClick = { selectedFormat = format }
+                            )
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = selectedFormat == format,
+                            selected = (format == selectedFormat),
                             onClick = { selectedFormat = format }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text(text = format.displayName)
+                            Text(text = "${format.displayName} (.${format.extension})")
                             Text(
                                 text = when (format) {
                                     ImageFormat.JPEG -> "Smaller file size, adjustable quality"
                                     ImageFormat.PNG -> "Lossless, larger file size"
                                     ImageFormat.TIFF -> "Best for scientific analysis"
                                 },
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -761,7 +969,7 @@ private fun ExportDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onExport(selectedFormat) }) {
+            Button(onClick = { onExport(selectedMode, selectedFormat) }) {
                 Text("Export")
             }
         },
@@ -983,3 +1191,4 @@ private fun ReanalyzeDialog(
         }
     )
 }
+
