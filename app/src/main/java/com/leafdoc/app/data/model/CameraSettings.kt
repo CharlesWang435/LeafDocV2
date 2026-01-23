@@ -93,7 +93,12 @@ enum class GridOverlayType(val displayName: String) {
     GRID_4X4("4x4 Grid")
 }
 
-enum class CaptureFormat(val displayName: String, val fileExtension: String, val bitDepth: Int) {
-    JPEG("JPEG (8-bit)", "jpg", 8),
-    PNG_16("PNG (16-bit)", "png", 16)
+enum class CaptureFormat(
+    val displayName: String,
+    val fileExtension: String,
+    val bitDepth: Int,
+    val isAvailable: Boolean = true
+) {
+    JPEG("JPEG (8-bit)", "jpg", 8, isAvailable = true),
+    RAW_DNG("RAW DNG (16-bit) - Coming Soon", "dng", 16, isAvailable = false)
 }

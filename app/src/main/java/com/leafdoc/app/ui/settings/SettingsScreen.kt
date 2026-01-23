@@ -107,6 +107,20 @@ fun SettingsScreen(
 
             // Camera Settings Section
             SettingsSection(title = "Camera") {
+                // Capture Format
+                SettingsDropdown(
+                    label = "Capture Format",
+                    value = cameraSettings.captureFormat.displayName,
+                    options = CaptureFormat.entries.map { it.displayName },
+                    onSelect = { index ->
+                        val selectedFormat = CaptureFormat.entries[index]
+                        if (selectedFormat.isAvailable) {
+                            viewModel.updateCaptureFormat(selectedFormat)
+                        }
+                    },
+                    icon = Icons.Default.Image
+                )
+
                 // Resolution
                 SettingsDropdown(
                     label = "Default Resolution",
