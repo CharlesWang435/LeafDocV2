@@ -82,7 +82,11 @@ com.leafdoc.app/
 
 - **ManualAlignmentScreen** (`ui/camera/`): Fullscreen dialog for manual Y-axis alignment before stitching. Shows live preview synchronized with segment thumbnails, +/- buttons to adjust each segment's vertical offset (±500px range), and "Auto Align" button that applies `MidribAligner` detection as a starting point. Available both during capture flow and from `ResultsScreen` for re-alignment of saved sessions. Segment thumbnails are clickable to open `FullscreenSegmentViewer` with horizontal swipe navigation between frames.
 
-- **Image Quality**: Camera captures at device's maximum native resolution using `ResolutionSelector` with `HIGHEST_AVAILABLE_STRATEGY`, ensuring the full sensor output is captured without aspect ratio cropping. JPEG quality is set to 100 for maximum detail. This ensures high-quality scientific imaging suitable for disease analysis. The captured images are always the full sensor output, regardless of what's visible in the preview (which uses `FILL_CENTER` scaling).
+- **Image Quality & Capture Formats**: Camera captures at device's maximum native resolution using 4:3 aspect ratio to get full sensor output without aspect ratio cropping. The app supports two capture formats:
+  - **JPEG (8-bit)**: Default format with quality=100 for maximum detail. Standard 8 bits per channel (24-bit RGB). File size: ~3-5MB per image. Suitable for most scientific imaging and AI diagnosis.
+  - **RAW DNG (16-bit)**: *Coming Soon* - Will capture true RAW sensor data (10-12 bit) and save as DNG format for maximum dynamic range and scientific accuracy. File size: ~20-50MB per image. Currently shows as "Coming Soon" in settings.
+
+  Capture format is configurable in Settings > Camera > Capture Format. The captured images are always the full sensor output, regardless of what's visible in the preview (which uses `FILL_CENTER` scaling).
 
 ### Database Schema
 

@@ -68,6 +68,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     // Camera Settings
+    fun updateCaptureFormat(format: CaptureFormat) {
+        viewModelScope.launch {
+            preferencesManager.updateCameraSettings(
+                cameraSettings.value.copy(captureFormat = format)
+            )
+        }
+    }
+
     fun updateGridOverlay(type: GridOverlayType) {
         viewModelScope.launch {
             preferencesManager.updateCameraSettings(

@@ -21,6 +21,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.leafdoc.app.data.model.CameraSettings
+import com.leafdoc.app.data.model.CaptureFormat
 import com.leafdoc.app.data.model.FlashMode
 import com.leafdoc.app.data.model.ResolutionMode
 import com.leafdoc.app.data.model.WhiteBalanceMode
@@ -207,33 +208,9 @@ class ProCameraController(
             val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
 
             // Only include back-facing cameras
+            // IMPORTANT: Only add logical camera IDs, not physical camera IDs
+            // Physical cameras can't be bound directly in CameraX
             if (lensFacing == CameraCharacteristics.LENS_FACING_BACK) {
-                // Get physical camera IDs (API 28+)
-                val physicalCameras = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    characteristics.physicalCameraIds
-                } else {
-                    emptySet()
-                }
-
-                // Process physical cameras if available
-                if (physicalCameras.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    for (physicalId in physicalCameras) {
-                        if (addedCameraIds.contains(physicalId)) continue
-
-                        try {
-                            val physicalChars = cameraManager.getCameraCharacteristics(physicalId)
-                            val lensInfo = createLensInfo(physicalId, physicalChars)
-                            if (lensInfo != null) {
-                                availableLenses.add(lensInfo)
-                                addedCameraIds.add(physicalId)
-                            }
-                        } catch (e: Exception) {
-                            // Physical camera might not be accessible directly
-                        }
-                    }
-                }
-
-                // Also add the logical camera if not already added via physical cameras
                 if (!addedCameraIds.contains(cameraId)) {
                     val lensInfo = createLensInfo(cameraId, characteristics)
                     if (lensInfo != null) {
@@ -322,12 +299,24 @@ class ProCameraController(
         val imageCaptureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
 
-        // Configure format - always capture as JPEG, then convert to 16-bit PNG if needed
-        // CameraX doesn't support RAW directly, so we capture JPEG at max quality
-        // and convert to 16-bit PNG for extended dynamic range
-        imageCaptureBuilder
-            .setJpegQuality(100)  // Maximum JPEG quality
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+        // Configure format based on settings
+        when (settings.captureFormat) {
+            CaptureFormat.JPEG -> {
+                // 8-bit JPEG at maximum quality
+                imageCaptureBuilder
+                    .setJpegQuality(100)  // Maximum JPEG quality for detailed scientific imaging
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            }
+            CaptureFormat.RAW_DNG -> {
+                // RAW/DNG capture - currently in development
+                // For now, fall back to JPEG. RAW implementation requires Camera2 API
+                // and DNG writer, which will be added in a future update
+                imageCaptureBuilder
+                    .setJpegQuality(100)
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                timber.log.Timber.w("RAW capture requested but not yet implemented, using JPEG")
+            }
+        }
 
         // Set target resolution for non-FULL modes
         if (settings.resolution != ResolutionMode.FULL) {
@@ -357,14 +346,24 @@ class ProCameraController(
 
         val cameraSelector = if (cameraId != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             // Use specific camera by ID (for multi-lens support)
-            CameraSelector.Builder()
-                .addCameraFilter { cameras ->
-                    cameras.filter { cameraInfo ->
-                        val info = Camera2CameraInfo.from(cameraInfo)
-                        info.cameraId == cameraId
+            try {
+                CameraSelector.Builder()
+                    .addCameraFilter { cameras ->
+                        val filtered = cameras.filter { cameraInfo ->
+                            val info = Camera2CameraInfo.from(cameraInfo)
+                            info.cameraId == cameraId
+                        }
+                        // If filter returns empty, fall back to all cameras
+                        if (filtered.isEmpty()) cameras else filtered
                     }
-                }
-                .build()
+                    .build()
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "Failed to create camera selector for ID $cameraId, using default")
+                // Fallback to default back camera
+                CameraSelector.Builder()
+                    .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                    .build()
+            }
         } else {
             // Default to back camera
             CameraSelector.Builder()
