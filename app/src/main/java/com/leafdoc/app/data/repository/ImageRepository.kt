@@ -167,7 +167,9 @@ class ImageRepository @Inject constructor(
         bitmap: Bitmap,
         sessionId: String,
         segmentIndex: Int,
-        maxSize: Int = 256
+        // Doubles as the in-app display/AI proxy for formats Android can't decode (TIFF),
+        // so keep it reasonably large rather than a tiny thumbnail.
+        maxSize: Int = 1024
     ): String = withContext(Dispatchers.IO) {
         val thumbnailFile = File(thumbnailDir, "thumb_${sessionId}_${segmentIndex}_${dateFormat.format(Date())}.jpg")
 
@@ -243,6 +245,16 @@ class ImageRepository @Inject constructor(
         val sourceFile = File(imagePath)
         if (!sourceFile.exists()) return@withContext null
 
+        // Masters Android can't decode (TIFF/DNG): export the original bytes losslessly,
+        // keeping the source extension/mime instead of re-encoding to the raster export format.
+        val srcExt = sourceFile.extension.lowercase()
+        if (srcExt == "tiff" || srcExt == "tif" || srcExt == "dng") {
+            val base = customFileName?.substringBeforeLast('.')
+                ?: "LeafDoc_${dateFormat.format(Date())}"
+            val mime = if (srcExt == "dng") "image/x-adobe-dng" else "image/tiff"
+            return@withContext exportRawBytes(sourceFile, "$base.$srcExt", mime, settings)
+        }
+
         val bitmap = BitmapFactory.decodeFile(imagePath) ?: return@withContext null
 
         val fileName = customFileName
@@ -256,6 +268,44 @@ class ImageRepository @Inject constructor(
             }
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    /** Copies an already-encoded file (TIFF/DNG) into the chosen export location, losslessly. */
+    private fun exportRawBytes(
+        src: File,
+        fileName: String,
+        mimeType: String,
+        settings: ExportSettings
+    ): Uri? {
+        // MediaStore is picky: the Images collection only allows Pictures/DCIM, while the Files
+        // collection only allows Download/Documents. Route each directory to the right collection.
+        val subDir = when (settings.exportLocation) {
+            ExportLocation.DOCUMENTS_FOLDER -> Environment.DIRECTORY_DOCUMENTS
+            ExportLocation.DOWNLOADS_FOLDER -> Environment.DIRECTORY_DOWNLOADS
+            else -> Environment.DIRECTORY_PICTURES
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = if (subDir == Environment.DIRECTORY_PICTURES) {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            } else {
+                MediaStore.Files.getContentUri("external")
+            }
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$subDir/LeafDoc")
+            }
+            val uri = context.contentResolver.insert(collection, contentValues) ?: return null
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                src.inputStream().use { it.copyTo(out) }
+            }
+            uri
+        } else {
+            val dir = File(Environment.getExternalStoragePublicDirectory(subDir), "LeafDoc").apply { mkdirs() }
+            val dest = File(dir, fileName)
+            src.copyTo(dest, overwrite = true)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dest)
         }
     }
 

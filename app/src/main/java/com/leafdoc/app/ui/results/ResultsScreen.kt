@@ -33,6 +33,17 @@ import com.leafdoc.app.ui.components.ClickableZoomableImage
 import java.text.SimpleDateFormat
 import java.util.*
 
+/** True if Coil can render this file directly. TIFF/DNG can't be shown, so we use a JPEG proxy. */
+private fun isDisplayable(path: String?): Boolean {
+    if (path == null) return false
+    val p = path.lowercase()
+    return p.endsWith(".jpg") || p.endsWith(".jpeg") || p.endsWith(".png") || p.endsWith(".webp")
+}
+
+/** A renderable path for a segment: the image itself, or its JPEG thumbnail if not displayable. */
+private fun com.leafdoc.app.data.model.LeafSegment.displayPath(): String? =
+    if (isDisplayable(imagePath)) imagePath else (thumbnailPath ?: imagePath)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultsScreen(
@@ -117,8 +128,9 @@ fun ResultsScreen(
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Image Preview — falls back to the first frame when there's no stitched image
-                val mainImagePath = session!!.stitchedImagePath ?: segments.firstOrNull()?.imagePath
+                // Image Preview — falls back to the first frame (its displayable proxy) when
+                // there's no stitched image.
+                val mainImagePath = session!!.stitchedImagePath ?: segments.firstOrNull()?.displayPath()
                 ImagePreviewCard(
                     imagePath = mainImagePath,
                     segmentCount = session!!.segmentCount,
@@ -742,9 +754,9 @@ private fun IndividualFramesCard(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            // Use ClickableZoomableImage for zoom support
+                            // Use ClickableZoomableImage for zoom support (JPEG proxy for TIFF)
                             ClickableZoomableImage(
-                                imagePath = segment.imagePath,
+                                imagePath = segment.displayPath() ?: segment.imagePath,
                                 contentDescription = "Frame ${index + 1}",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -779,7 +791,7 @@ private fun IndividualFramesCard(
                         }
 
                         TextButton(
-                            onClick = { onDiagnoseFrame(segment.imagePath) },
+                            onClick = { onDiagnoseFrame(segment.displayPath() ?: segment.imagePath) },
                             enabled = !isAnalyzing,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
