@@ -26,6 +26,9 @@ fun SettingsScreen(
     val exportSettings by viewModel.exportSettings.collectAsState()
     val farmerId by viewModel.farmerId.collectAsState()
     val fieldId by viewModel.fieldId.collectAsState()
+    val farmerIdOptions by viewModel.farmerIdOptions.collectAsState()
+    val fieldIdOptions by viewModel.fieldIdOptions.collectAsState()
+    val treatmentOptions by viewModel.treatmentOptions.collectAsState()
     val overlapPercentage by viewModel.overlapPercentage.collectAsState()
     val autoSaveSegments by viewModel.autoSaveSegments.collectAsState()
     val vibrateOnCapture by viewModel.vibrateOnCapture.collectAsState()
@@ -92,6 +95,34 @@ fun SettingsScreen(
                         viewModel.updateFieldId(it)
                     },
                     icon = Icons.Default.Landscape
+                )
+            }
+
+            // Saved Lists Section — user-managed pick options for capture metadata
+            SettingsSection(title = "Saved Lists") {
+                Text(
+                    text = "Create reusable options. During capture, tap a field to pick one (or type a one-off).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                EditableOptionList(
+                    title = "Farmer IDs",
+                    options = farmerIdOptions,
+                    onAdd = { viewModel.addFarmerIdOption(it) },
+                    onRemove = { viewModel.removeFarmerIdOption(it) }
+                )
+                EditableOptionList(
+                    title = "Field IDs",
+                    options = fieldIdOptions,
+                    onAdd = { viewModel.addFieldIdOption(it) },
+                    onRemove = { viewModel.removeFieldIdOption(it) }
+                )
+                EditableOptionList(
+                    title = "Treatments",
+                    options = treatmentOptions,
+                    onAdd = { viewModel.addTreatmentOption(it) },
+                    onRemove = { viewModel.removeTreatmentOption(it) }
                 )
             }
 
@@ -353,6 +384,61 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun EditableOptionList(
+    title: String,
+    options: List<String>,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(4.dp))
+
+        if (options.isEmpty()) {
+            Text(
+                text = "No saved options yet",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            options.forEach { opt ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(opt, style = MaterialTheme.typography.bodyMedium)
+                    IconButton(onClick = { onRemove(opt) }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remove $opt",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                label = { Text("Add new") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = {
+                if (input.isNotBlank()) { onAdd(input.trim()); input = "" }
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "Add", tint = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }

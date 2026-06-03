@@ -39,6 +39,11 @@ class UserPreferencesManager(private val context: Context) {
         val FARMER_ID = stringPreferencesKey("farmer_id")
         val FIELD_ID = stringPreferencesKey("field_id")
 
+        // User-managed pick lists for capture metadata
+        val FARMER_ID_OPTIONS = stringSetPreferencesKey("farmer_id_options")
+        val FIELD_ID_OPTIONS = stringSetPreferencesKey("field_id_options")
+        val TREATMENT_OPTIONS = stringSetPreferencesKey("treatment_options")
+
         // App settings
         val OVERLAP_GUIDE_PERCENTAGE = intPreferencesKey("overlap_guide_percentage")
         val AUTO_SAVE_SEGMENTS = booleanPreferencesKey("auto_save_segments")
@@ -118,6 +123,17 @@ class UserPreferencesManager(private val context: Context) {
 
     val fieldId: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.FIELD_ID] ?: ""
+    }
+
+    // User-managed pick lists (sorted for display)
+    val farmerIdOptions: Flow<List<String>> = context.dataStore.data.map { p ->
+        (p[PreferencesKeys.FARMER_ID_OPTIONS] ?: emptySet()).sorted()
+    }
+    val fieldIdOptions: Flow<List<String>> = context.dataStore.data.map { p ->
+        (p[PreferencesKeys.FIELD_ID_OPTIONS] ?: emptySet()).sorted()
+    }
+    val treatmentOptions: Flow<List<String>> = context.dataStore.data.map { p ->
+        (p[PreferencesKeys.TREATMENT_OPTIONS] ?: emptySet()).sorted()
     }
 
     val overlapGuidePercentage: Flow<Int> = context.dataStore.data.map { preferences ->
@@ -227,6 +243,23 @@ class UserPreferencesManager(private val context: Context) {
             preferences[PreferencesKeys.FIELD_ID] = fieldId
         }
     }
+
+    // ---- Pick-list management (Farmer / Field / Treatment) ----
+    private suspend fun addOption(key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>, value: String) {
+        val v = value.trim()
+        if (v.isEmpty()) return
+        context.dataStore.edit { p -> p[key] = (p[key] ?: emptySet()) + v }
+    }
+    private suspend fun removeOption(key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>, value: String) {
+        context.dataStore.edit { p -> p[key] = (p[key] ?: emptySet()) - value }
+    }
+
+    suspend fun addFarmerIdOption(value: String) = addOption(PreferencesKeys.FARMER_ID_OPTIONS, value)
+    suspend fun removeFarmerIdOption(value: String) = removeOption(PreferencesKeys.FARMER_ID_OPTIONS, value)
+    suspend fun addFieldIdOption(value: String) = addOption(PreferencesKeys.FIELD_ID_OPTIONS, value)
+    suspend fun removeFieldIdOption(value: String) = removeOption(PreferencesKeys.FIELD_ID_OPTIONS, value)
+    suspend fun addTreatmentOption(value: String) = addOption(PreferencesKeys.TREATMENT_OPTIONS, value)
+    suspend fun removeTreatmentOption(value: String) = removeOption(PreferencesKeys.TREATMENT_OPTIONS, value)
 
     suspend fun updateOverlapGuidePercentage(percentage: Int) {
         context.dataStore.edit { preferences ->

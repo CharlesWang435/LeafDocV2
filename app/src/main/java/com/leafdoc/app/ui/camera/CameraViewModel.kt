@@ -87,6 +87,37 @@ class CameraViewModel @Inject constructor(
     private val _cropRectEnabled = MutableStateFlow(true)
     val cropRectEnabled: StateFlow<Boolean> = _cropRectEnabled.asStateFlow()
 
+    // ---- Simple (fast field) capture mode ----
+    private val _simpleMode = MutableStateFlow(false)
+    val simpleMode: StateFlow<Boolean> = _simpleMode.asStateFlow()
+
+    private val _simpleFarmerId = MutableStateFlow("")
+    val simpleFarmerId: StateFlow<String> = _simpleFarmerId.asStateFlow()
+
+    private val _simpleFieldId = MutableStateFlow("")
+    val simpleFieldId: StateFlow<String> = _simpleFieldId.asStateFlow()
+
+    private val _simpleTreatment = MutableStateFlow("")
+    val simpleTreatment: StateFlow<String> = _simpleTreatment.asStateFlow()
+
+    private val _simpleLeafNumber = MutableStateFlow(1)
+    val simpleLeafNumber: StateFlow<Int> = _simpleLeafNumber.asStateFlow()
+
+    // User-managed pick lists for capture metadata
+    val farmerIdOptions: StateFlow<List<String>> = preferencesManager.farmerIdOptions
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val fieldIdOptions: StateFlow<List<String>> = preferencesManager.fieldIdOptions
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val treatmentOptions: StateFlow<List<String>> = preferencesManager.treatmentOptions
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // The captured image awaiting Retake/Export review in Simple mode.
+    private val _pendingCapture = MutableStateFlow<CapturedImage?>(null)
+    val pendingCapture: StateFlow<CapturedImage?> = _pendingCapture.asStateFlow()
+
+    private val exportSettings: StateFlow<ExportSettings> = preferencesManager.exportSettings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ExportSettings())
+
     // Preview dimensions for accurate crop mapping
     private var previewWidth: Int = 0
     private var previewHeight: Int = 0
@@ -143,12 +174,13 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    fun startNewSession(farmerId: String = "", fieldId: String = "", leafNumber: Int = 1) {
+    fun startNewSession(farmerId: String = "", fieldId: String = "", treatment: String = "", leafNumber: Int = 1) {
         viewModelScope.launch {
             try {
                 currentSession = sessionRepository.createSession(
                     farmerId = farmerId,
                     fieldId = fieldId,
+                    treatment = treatment,
                     leafNumber = leafNumber,
                     latitude = currentLocation?.latitude,
                     longitude = currentLocation?.longitude,
@@ -323,60 +355,55 @@ class CameraViewModel @Inject constructor(
      * 2. Map the crop rectangle (which is relative to this visible portion) to absolute image coordinates
      */
     private fun cropBitmap(source: Bitmap, cropRect: CropRect): Bitmap {
-        // The captured image dimensions
         val imageWidth = source.width.toFloat()
         val imageHeight = source.height.toFloat()
         val imageAspect = imageWidth / imageHeight
 
-        // Use actual preview dimensions if available, otherwise use typical portrait aspect
-        val screenAspect = if (previewWidth > 0 && previewHeight > 0) {
+        val viewAspect = if (previewWidth > 0 && previewHeight > 0) {
             previewWidth.toFloat() / previewHeight.toFloat()
         } else {
-            9f / 16f // Fallback: typical portrait phone
+            imageAspect // Fallback: assume no letterboxing
         }
 
-        // Calculate what portion of the image is visible in FILL_CENTER mode
-        // The visible region is what the user sees in the preview
-        val visibleLeft: Float
-        val visibleTop: Float
-        val visibleWidth: Float
-        val visibleHeight: Float
-
-        if (imageAspect > screenAspect) {
-            // Image is wider than screen - sides are cropped from view
-            // Full height is visible, but width is scaled down to fit screen
-            visibleHeight = imageHeight
-            visibleWidth = imageHeight * screenAspect
-            visibleLeft = (imageWidth - visibleWidth) / 2f
-            visibleTop = 0f
+        // With FIT_CENTER the WHOLE image is shown, centered, with letterbox bars. The crop
+        // rect fractions are relative to the full PreviewView (including bars), so map each
+        // axis from view-fraction → image-fraction by removing the bar offset/scale.
+        val (leftF, rightF, topF, bottomF) = if (imageAspect > viewAspect) {
+            // Bars on top/bottom: image fills width, occupies a centered vertical band.
+            val bandFrac = viewAspect / imageAspect          // fraction of view height covered by image
+            val barFrac = (1f - bandFrac) / 2f
+            CropFractions(
+                left = cropRect.left,
+                right = cropRect.right,
+                top = ((cropRect.top - barFrac) / bandFrac),
+                bottom = ((cropRect.bottom - barFrac) / bandFrac)
+            )
         } else {
-            // Image is taller than screen - top/bottom are cropped from view
-            // Full width is visible, but height is scaled down to fit screen
-            visibleWidth = imageWidth
-            visibleHeight = imageWidth / screenAspect
-            visibleLeft = 0f
-            visibleTop = (imageHeight - visibleHeight) / 2f
+            // Bars on left/right: image fills height, occupies a centered horizontal band.
+            val bandFrac = imageAspect / viewAspect          // fraction of view width covered by image
+            val barFrac = (1f - bandFrac) / 2f
+            CropFractions(
+                left = ((cropRect.left - barFrac) / bandFrac),
+                right = ((cropRect.right - barFrac) / bandFrac),
+                top = cropRect.top,
+                bottom = cropRect.bottom
+            )
         }
 
-        // Now map the crop rectangle coordinates from the visible region to absolute image coordinates
-        // cropRect values are fractions (0-1) relative to the visible region
-        // We need to convert them to pixel coordinates in the full image
-        val cropLeft = visibleLeft + (cropRect.left * visibleWidth)
-        val cropTop = visibleTop + (cropRect.top * visibleHeight)
-        val cropRight = visibleLeft + (cropRect.right * visibleWidth)
-        val cropBottom = visibleTop + (cropRect.bottom * visibleHeight)
+        val left = (leftF.coerceIn(0f, 1f) * imageWidth).toInt().coerceIn(0, source.width - 1)
+        val top = (topF.coerceIn(0f, 1f) * imageHeight).toInt().coerceIn(0, source.height - 1)
+        val right = (rightF.coerceIn(0f, 1f) * imageWidth).toInt().coerceIn(left + 1, source.width)
+        val bottom = (bottomF.coerceIn(0f, 1f) * imageHeight).toInt().coerceIn(top + 1, source.height)
 
-        // Ensure coordinates are within bounds and valid
-        val left = cropLeft.toInt().coerceIn(0, source.width - 1)
-        val top = cropTop.toInt().coerceIn(0, source.height - 1)
-        val right = cropRight.toInt().coerceIn(left + 1, source.width)
-        val bottom = cropBottom.toInt().coerceIn(top + 1, source.height)
-
-        val width = right - left
-        val height = bottom - top
-
-        return Bitmap.createBitmap(source, left, top, width, height)
+        return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
     }
+
+    private data class CropFractions(
+        val left: Float,
+        val right: Float,
+        val top: Float,
+        val bottom: Float
+    )
 
     /**
      * Called when user taps "Finish Session".
@@ -468,6 +495,132 @@ class CameraViewModel @Inject constructor(
                 )}
             }
         }
+    }
+
+    // ==================== Simple (fast field) Mode ====================
+
+    /** Enters Simple mode: one image per leaf, edit metadata inline, review, export, repeat. */
+    fun startSimpleMode(farmerId: String, fieldId: String, treatment: String, leafNumber: Int) {
+        _simpleFarmerId.value = farmerId
+        _simpleFieldId.value = fieldId
+        _simpleTreatment.value = treatment
+        _simpleLeafNumber.value = leafNumber.coerceAtLeast(1)
+        _pendingCapture.value = null
+        _simpleMode.value = true
+        _uiState.update { it.copy(message = "Simple mode — set details, then capture") }
+    }
+
+    fun setSimpleFarmerId(value: String) { _simpleFarmerId.value = value }
+    fun setSimpleFieldId(value: String) { _simpleFieldId.value = value }
+    fun setSimpleTreatment(value: String) { _simpleTreatment.value = value }
+    fun setSimpleLeafNumber(value: Int) { _simpleLeafNumber.value = value.coerceAtLeast(1) }
+
+    /** Holds a freshly captured image for Retake/Export review. */
+    fun onSimpleCaptured(image: CapturedImage) {
+        _pendingCapture.value = image
+    }
+
+    /** Discards the pending capture and returns to the live camera. */
+    fun retakeSimple() {
+        _pendingCapture.value?.bitmap?.let { if (!it.isRecycled) it.recycle() }
+        _pendingCapture.value = null
+    }
+
+    /** Commits the pending capture: saves a single-image session AND exports it to Photos. */
+    fun exportSimpleCapture() {
+        viewModelScope.launch {
+            val image = _pendingCapture.value ?: return@launch
+            _uiState.update { it.copy(isProcessing = true, message = "Saving & exporting...") }
+            try {
+                val farmerId = _simpleFarmerId.value
+                val fieldId = _simpleFieldId.value
+                val treatment = _simpleTreatment.value
+                val leaf = _simpleLeafNumber.value
+
+                // 1. Single-image session (kept in the app gallery)
+                val session = sessionRepository.createSession(
+                    farmerId = farmerId,
+                    fieldId = fieldId,
+                    treatment = treatment,
+                    leafNumber = leaf,
+                    latitude = currentLocation?.latitude,
+                    longitude = currentLocation?.longitude,
+                    altitude = currentLocation?.altitude,
+                    locationAccuracy = currentLocation?.accuracy
+                )
+
+                // 2. Save the image as the session's single segment
+                val imagePath: String
+                val thumbPath: String
+                val w: Int
+                val h: Int
+                if (image.filePath != null) {
+                    imagePath = imageRepository.saveSegmentFile(image.filePath, session.id, 0)
+                    thumbPath = imagePath
+                    w = image.width; h = image.height
+                    image.dngFilePath?.let { dng ->
+                        imageRepository.saveRawToGallery(dng, simpleFileName(farmerId, fieldId, treatment, leaf, "dng"))
+                    }
+                } else {
+                    val bmp = image.bitmap ?: throw Exception("No image data")
+                    val format = _cameraSettings.value.captureFormat
+                    imagePath = imageRepository.saveSegmentImage(bmp, session.id, 0, format = format)
+                    thumbPath = imageRepository.createThumbnailFromBitmap(bmp, session.id, 0)
+                    w = bmp.width; h = bmp.height
+                }
+
+                sessionRepository.addSegment(
+                    sessionId = session.id,
+                    imagePath = imagePath,
+                    thumbnailPath = thumbPath,
+                    width = w,
+                    height = h,
+                    iso = image.iso,
+                    shutterSpeed = image.shutterSpeed,
+                    focusDistance = image.focusDistance,
+                    whiteBalance = image.whiteBalance.temperature,
+                    exposureCompensation = image.exposureCompensation,
+                    isMultiFrameSession = false
+                )
+                sessionRepository.completeSessionWithoutStitch(session.id)
+
+                // 3. Export the image to Photos
+                val settings = exportSettings.value
+                imageRepository.exportImage(
+                    imagePath,
+                    settings,
+                    simpleFileName(farmerId, fieldId, treatment, leaf, settings.format.extension)
+                )
+
+                // 4. Clear pending, ready for next leaf
+                image.bitmap?.let { if (!it.isRecycled) it.recycle() }
+                _pendingCapture.value = null
+
+                _uiState.update { it.copy(
+                    isProcessing = false,
+                    message = "Leaf $leaf saved & exported. Set details for the next."
+                )}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isProcessing = false, error = "Export failed: ${e.message}") }
+            }
+        }
+    }
+
+    /** Exits Simple mode entirely. */
+    fun exitSimpleMode() {
+        retakeSimple()
+        _simpleMode.value = false
+        _uiState.update { it.copy(message = null) }
+    }
+
+    private fun simpleFileName(farmer: String, field: String, treatment: String, leaf: Int, ext: String): String {
+        val parts = mutableListOf("LeafDoc")
+        if (farmer.isNotEmpty()) parts.add(farmer.take(20))
+        if (field.isNotEmpty()) parts.add(field.take(20))
+        if (treatment.isNotEmpty()) parts.add(treatment.take(20))
+        parts.add("Leaf$leaf")
+        parts.add(System.currentTimeMillis().toString())
+        return "${parts.joinToString("_")}.$ext"
     }
 
     /**
@@ -859,3 +1012,11 @@ data class CapturedSegmentInfo(
     val thumbnailPath: String?,
     val timestamp: Long
 )
+
+/** Capture workflow chosen at session start. */
+enum class SessionType {
+    /** Fast field flow: one image per leaf, edit metadata inline, review, export, repeat. */
+    SIMPLE,
+    /** Full flow: capture multiple frames, optional stitch + AI diagnosis. */
+    DETAILED
+}

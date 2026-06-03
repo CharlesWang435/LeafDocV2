@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +45,7 @@ import coil.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.leafdoc.app.camera.CameraCapabilities
+import com.leafdoc.app.camera.CapturedImage
 import com.leafdoc.app.camera.CameraState
 import com.leafdoc.app.camera.LensInfo
 import com.leafdoc.app.camera.LensType
@@ -83,6 +85,19 @@ fun CameraScreen(
     // Manual alignment state
     val showManualAlignment by viewModel.showManualAlignment.collectAsState()
     val alignmentBitmaps by viewModel.alignmentBitmaps.collectAsState()
+
+    // Simple (fast field) mode state
+    val simpleMode by viewModel.simpleMode.collectAsState()
+    val pendingCapture by viewModel.pendingCapture.collectAsState()
+    val simpleFarmerId by viewModel.simpleFarmerId.collectAsState()
+    val simpleFieldId by viewModel.simpleFieldId.collectAsState()
+    val simpleTreatment by viewModel.simpleTreatment.collectAsState()
+    val simpleLeafNumber by viewModel.simpleLeafNumber.collectAsState()
+
+    // User-managed pick lists for capture metadata
+    val farmerIdOptions by viewModel.farmerIdOptions.collectAsState()
+    val fieldIdOptions by viewModel.fieldIdOptions.collectAsState()
+    val treatmentOptions by viewModel.treatmentOptions.collectAsState()
 
     // Pop-out panel state
     var showLockControlsPanel by remember { mutableStateOf(false) }
@@ -140,7 +155,9 @@ fun CameraScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                        // FIT_CENTER shows the entire captured frame (letterboxed top/bottom),
+                        // so the preview matches the final image aspect ratio (WYSIWYG).
+                        scaleType = PreviewView.ScaleType.FIT_CENTER
                         previewView = this
 
                         // Track preview dimensions
@@ -183,8 +200,8 @@ fun CameraScreen(
                 )
             }
 
-            // Crop Rectangle Overlay (only if enabled)
-            if (cropRectEnabled) {
+            // Crop Rectangle Overlay (only if enabled; hidden in Simple mode for a clean full-frame shot)
+            if (cropRectEnabled && !simpleMode) {
                 CropRectangleOverlay(
                     cropRect = cropRect,
                     onCropRectChanged = { viewModel.updateCropRect(it) },
@@ -195,7 +212,7 @@ fun CameraScreen(
             }
 
             // Midrib Guide Line (horizontal guide for aligning the leaf midrib)
-            if (midribGuideEnabled) {
+            if (midribGuideEnabled && !simpleMode) {
                 MidribGuideOverlay(
                     guidePositionPercent = midribGuidePosition,
                     guideThicknessPercent = midribGuideThickness,
@@ -280,6 +297,7 @@ fun CameraScreen(
             // Bottom Controls
             BottomControls(
                 sessionActive = uiState.sessionActive,
+                simpleMode = simpleMode,
                 segmentCount = uiState.segmentCount,
                 isProcessing = uiState.isProcessing,
                 isStitching = uiState.isStitching,
@@ -290,7 +308,8 @@ fun CameraScreen(
                     scope.launch {
                         try {
                             cameraController?.captureImage()?.let { image ->
-                                viewModel.onImageCaptured(image)
+                                if (simpleMode) viewModel.onSimpleCaptured(image)
+                                else viewModel.onImageCaptured(image)
                             }
                         } catch (e: Exception) {
                             viewModel.reportCaptureError(e.message ?: "Capture failed")
@@ -298,7 +317,7 @@ fun CameraScreen(
                     }
                 },
                 onFinishSession = { viewModel.finishSessionFramesOnly() },
-                onCancelSession = { viewModel.cancelSession() },
+                onCancelSession = { if (simpleMode) viewModel.exitSimpleMode() else viewModel.cancelSession() },
                 onDeleteLast = { viewModel.deleteLastSegment() },
                 onToggleControls = { showProControls = !showProControls },
                 modifier = Modifier
@@ -318,14 +337,36 @@ fun CameraScreen(
                 )
             }
 
+            // Simple-mode metadata bar (always-visible, editable)
+            if (simpleMode) {
+                SimpleMetadataBar(
+                    farmerId = simpleFarmerId,
+                    fieldId = simpleFieldId,
+                    treatment = simpleTreatment,
+                    leafNumber = simpleLeafNumber,
+                    farmerOptions = farmerIdOptions,
+                    fieldOptions = fieldIdOptions,
+                    treatmentOptions = treatmentOptions,
+                    onFarmerIdChange = { viewModel.setSimpleFarmerId(it) },
+                    onFieldIdChange = { viewModel.setSimpleFieldId(it) },
+                    onTreatmentChange = { viewModel.setSimpleTreatment(it) },
+                    onLeafNumberChange = { viewModel.setSimpleLeafNumber(it) },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 64.dp, start = 12.dp, end = 12.dp)
+                )
+            }
+
             // Status Message
             uiState.message?.let { message ->
                 StatusMessage(
                     message = message,
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
+                        .align(if (simpleMode) Alignment.BottomCenter else Alignment.TopCenter)
                         .statusBarsPadding()
-                        .padding(top = 72.dp)
+                        .navigationBarsPadding()
+                        .padding(top = if (simpleMode) 0.dp else 72.dp, bottom = if (simpleMode) 150.dp else 0.dp)
                 )
             }
 
@@ -333,6 +374,18 @@ fun CameraScreen(
             if (uiState.isStitching) {
                 ProcessingOverlay(
                     message = "Creating panorama...",
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Simple-mode capture review (Retake / Export)
+            if (simpleMode && pendingCapture != null) {
+                SimpleReviewOverlay(
+                    image = pendingCapture!!,
+                    leafNumber = simpleLeafNumber,
+                    isProcessing = uiState.isProcessing,
+                    onRetake = { viewModel.retakeSimple() },
+                    onExport = { viewModel.exportSimpleCapture() },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -350,9 +403,16 @@ fun CameraScreen(
         SessionStartDialog(
             defaultFarmerId = defaultFarmerId,
             defaultFieldId = defaultFieldId,
+            farmerOptions = farmerIdOptions,
+            fieldOptions = fieldIdOptions,
+            treatmentOptions = treatmentOptions,
             onDismiss = { showSessionDialog = false },
-            onConfirm = { farmerId, fieldId, leafNumber ->
-                viewModel.startNewSession(farmerId, fieldId, leafNumber)
+            onConfirm = { type, farmerId, fieldId, treatment, leafNumber ->
+                if (type == SessionType.SIMPLE) {
+                    viewModel.startSimpleMode(farmerId, fieldId, treatment, leafNumber)
+                } else {
+                    viewModel.startNewSession(farmerId, fieldId, treatment, leafNumber)
+                }
                 showSessionDialog = false
             }
         )
@@ -544,6 +604,7 @@ private fun TopBar(
 @Composable
 private fun BottomControls(
     sessionActive: Boolean,
+    simpleMode: Boolean,
     segmentCount: Int,
     isProcessing: Boolean,
     isStitching: Boolean,
@@ -557,6 +618,8 @@ private fun BottomControls(
     onToggleControls: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // "Capture mode" = a session is active OR we're in Simple mode (shutter takes a photo).
+    val captureMode = sessionActive || simpleMode
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -570,16 +633,16 @@ private fun BottomControls(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Cancel / Delete last
-            if (sessionActive) {
+            if (captureMode) {
                 IconButton(
-                    onClick = if (segmentCount > 0) onDeleteLast else onCancelSession,
+                    onClick = if (sessionActive && segmentCount > 0) onDeleteLast else onCancelSession,
                     modifier = Modifier
                         .size(48.dp)
                         .background(Color.Black.copy(alpha = 0.5f), CircleShape)
                 ) {
                     Icon(
-                        imageVector = if (segmentCount > 0) Icons.Default.Undo else Icons.Default.Close,
-                        contentDescription = if (segmentCount > 0) "Delete last" else "Cancel",
+                        imageVector = if (sessionActive && segmentCount > 0) Icons.Default.Undo else Icons.Default.Close,
+                        contentDescription = if (sessionActive && segmentCount > 0) "Delete last" else "Cancel",
                         tint = Color.White
                     )
                 }
@@ -587,16 +650,30 @@ private fun BottomControls(
                 Spacer(modifier = Modifier.size(48.dp))
             }
 
-            // Capture button
-            CaptureButton(
-                enabled = !isProcessing && cameraState == CameraState.Ready,
-                sessionActive = sessionActive,
-                isCapturing = cameraState == CameraState.Capturing,
-                onCapture = if (sessionActive) onCapture else onStartSession,
-                modifier = Modifier.size(80.dp)
-            )
+            // Capture button (shutter in capture mode) OR a labeled "Start Session" button.
+            if (captureMode) {
+                CaptureButton(
+                    enabled = !isProcessing && cameraState == CameraState.Ready,
+                    sessionActive = true,
+                    isCapturing = cameraState == CameraState.Capturing,
+                    onCapture = onCapture,
+                    modifier = Modifier.size(80.dp)
+                )
+            } else {
+                Button(
+                    onClick = onStartSession,
+                    enabled = !isProcessing,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    shape = RoundedCornerShape(28.dp),
+                    modifier = Modifier.height(56.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Start Session", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
 
-            // Finish / Pro controls
+            // Finish / Pro controls (detailed sessions only)
             if (sessionActive && segmentCount > 0) {
                 IconButton(
                     onClick = onFinishSession,
@@ -658,6 +735,156 @@ private fun CaptureButton(
                     .clip(CircleShape)
                     .background(if (sessionActive) Color.Green else Color.Red)
             )
+        }
+    }
+}
+
+@Composable
+private fun SimpleMetadataBar(
+    farmerId: String,
+    fieldId: String,
+    treatment: String,
+    leafNumber: Int,
+    farmerOptions: List<String>,
+    fieldOptions: List<String>,
+    treatmentOptions: List<String>,
+    onFarmerIdChange: (String) -> Unit,
+    onFieldIdChange: (String) -> Unit,
+    onTreatmentChange: (String) -> Unit,
+    onLeafNumberChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = Color.White,
+        unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+        focusedLabelColor = Color.White,
+        unfocusedLabelColor = Color.White.copy(alpha = 0.7f),
+        cursorColor = Color.White,
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.Black.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OptionComboField(
+                    value = farmerId, onValueChange = onFarmerIdChange, label = "Farmer",
+                    options = farmerOptions, colors = fieldColors, modifier = Modifier.weight(1f)
+                )
+                OptionComboField(
+                    value = fieldId, onValueChange = onFieldIdChange, label = "Field",
+                    options = fieldOptions, colors = fieldColors, modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OptionComboField(
+                    value = treatment, onValueChange = onTreatmentChange, label = "Treatment",
+                    options = treatmentOptions, colors = fieldColors, modifier = Modifier.weight(1f)
+                )
+                // Leaf number stepper
+                IconButton(onClick = { onLeafNumberChange(leafNumber - 1) }) {
+                    Icon(Icons.Default.Remove, contentDescription = "Decrease leaf", tint = Color.White)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Leaf", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
+                    Text("$leafNumber", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                IconButton(onClick = { onLeafNumberChange(leafNumber + 1) }) {
+                    Icon(Icons.Default.Add, contentDescription = "Increase leaf", tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimpleReviewOverlay(
+    image: CapturedImage,
+    leafNumber: Int,
+    isProcessing: Boolean,
+    onRetake: () -> Unit,
+    onExport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        val bmp = image.bitmap
+        if (bmp != null && !bmp.isRecycled) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "Captured leaf",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        } else if (image.filePath != null) {
+            AsyncImage(
+                model = image.filePath,
+                contentDescription = "Captured leaf",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
+
+        Surface(
+            color = Color.Black.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 16.dp)
+        ) {
+            Text(
+                text = "Leaf $leafNumber — review",
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 32.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            OutlinedButton(
+                onClick = onRetake,
+                enabled = !isProcessing,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Retake")
+            }
+            Button(onClick = onExport, enabled = !isProcessing) {
+                if (isProcessing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Exporting...")
+                } else {
+                    Icon(Icons.Default.Download, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Export")
+                }
+            }
         }
     }
 }
@@ -868,30 +1095,69 @@ private fun PermissionRequest(
 private fun SessionStartDialog(
     defaultFarmerId: String,
     defaultFieldId: String,
+    farmerOptions: List<String>,
+    fieldOptions: List<String>,
+    treatmentOptions: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (farmerId: String, fieldId: String, leafNumber: Int) -> Unit
+    onConfirm: (type: SessionType, farmerId: String, fieldId: String, treatment: String, leafNumber: Int) -> Unit
 ) {
+    var sessionType by remember { mutableStateOf(SessionType.SIMPLE) }
     var farmerId by remember { mutableStateOf(defaultFarmerId) }
     var fieldId by remember { mutableStateOf(defaultFieldId) }
+    var treatment by remember { mutableStateOf("") }
     var leafNumber by remember { mutableStateOf("1") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Start New Session") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                Text("Session Type", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = sessionType == SessionType.SIMPLE,
+                        onClick = { sessionType = SessionType.SIMPLE },
+                        label = { Text("Simple") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = sessionType == SessionType.DETAILED,
+                        onClick = { sessionType = SessionType.DETAILED },
+                        label = { Text("Detailed") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = if (sessionType == SessionType.SIMPLE)
+                        "One image per leaf — edit details, capture, export, repeat."
+                    else
+                        "Multiple frames per leaf — optional stitching and AI diagnosis.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OptionComboField(
                     value = farmerId,
                     onValueChange = { farmerId = it },
-                    label = { Text("Farmer ID (optional)") },
-                    singleLine = true,
+                    label = "Farmer ID (optional)",
+                    options = farmerOptions,
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
+                OptionComboField(
                     value = fieldId,
                     onValueChange = { fieldId = it },
-                    label = { Text("Field ID (optional)") },
-                    singleLine = true,
+                    label = "Field ID (optional)",
+                    options = fieldOptions,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OptionComboField(
+                    value = treatment,
+                    onValueChange = { treatment = it },
+                    label = "Treatment (optional)",
+                    options = treatmentOptions,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
@@ -907,13 +1173,15 @@ private fun SessionStartDialog(
             Button(
                 onClick = {
                     onConfirm(
+                        sessionType,
                         farmerId,
                         fieldId,
+                        treatment,
                         leafNumber.toIntOrNull() ?: 1
                     )
                 }
             ) {
-                Text("Start Capture")
+                Text(if (sessionType == SessionType.SIMPLE) "Start" else "Start Capture")
             }
         },
         dismissButton = {
@@ -922,6 +1190,48 @@ private fun SessionStartDialog(
             }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OptionComboField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    options: List<String>,
+    modifier: Modifier = Modifier,
+    colors: androidx.compose.material3.TextFieldColors = OutlinedTextFieldDefaults.colors()
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded && options.isNotEmpty(),
+        onExpandedChange = { if (options.isNotEmpty()) expanded = it },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label, fontSize = 11.sp) },
+            singleLine = true,
+            trailingIcon = {
+                if (options.isNotEmpty()) ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            colors = colors,
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        if (options.isNotEmpty()) {
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { opt ->
+                    DropdownMenuItem(
+                        text = { Text(opt) },
+                        onClick = { onValueChange(opt); expanded = false }
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

@@ -390,6 +390,9 @@ private fun SessionInfoCard(
             if (session.fieldId.isNotEmpty()) {
                 InfoRow(label = "Field ID", value = session.fieldId)
             }
+            if (session.treatment.isNotEmpty()) {
+                InfoRow(label = "Treatment", value = session.treatment)
+            }
 
             if (session.latitude != null && session.longitude != null) {
                 InfoRow(

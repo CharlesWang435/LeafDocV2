@@ -226,6 +226,9 @@ class ResultsViewModel @Inject constructor(
         if (session.fieldId.isNotEmpty()) {
             parts.add(session.fieldId.take(20))
         }
+        if (session.treatment.isNotEmpty()) {
+            parts.add(session.treatment.take(20))
+        }
         parts.add("Leaf${session.leafNumber}")
 
         val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)

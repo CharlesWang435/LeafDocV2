@@ -13,6 +13,7 @@ data class LeafSession(
     val id: String = UUID.randomUUID().toString(),
     val farmerId: String = "",
     val fieldId: String = "",
+    val treatment: String = "",
     val leafNumber: Int = 1,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),

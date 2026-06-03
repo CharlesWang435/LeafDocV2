@@ -10,7 +10,7 @@ import com.leafdoc.app.data.model.LeafSession
 
 @Database(
     entities = [LeafSession::class, LeafSegment::class],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -34,8 +34,18 @@ abstract class LeafDocDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add treatment column for the new metadata field
+                database.execSQL(
+                    "ALTER TABLE leaf_sessions ADD COLUMN treatment TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         val ALL_MIGRATIONS: Array<Migration> = arrayOf(
-            MIGRATION_1_2
+            MIGRATION_1_2,
+            MIGRATION_2_3
         )
     }
 }
