@@ -20,6 +20,7 @@ class UserPreferencesManager(private val context: Context) {
         val WHITE_BALANCE = stringPreferencesKey("camera_white_balance")
         val EXPOSURE_COMPENSATION = floatPreferencesKey("camera_exposure_compensation")
         val RESOLUTION = stringPreferencesKey("camera_resolution")
+        val CAPTURE_FORMAT = stringPreferencesKey("camera_capture_format")
         val FLASH_MODE = stringPreferencesKey("camera_flash_mode")
         val GRID_OVERLAY = stringPreferencesKey("camera_grid_overlay")
         val SHOW_HISTOGRAM = booleanPreferencesKey("camera_show_histogram")
@@ -71,6 +72,13 @@ class UserPreferencesManager(private val context: Context) {
             resolution = preferences[PreferencesKeys.RESOLUTION]?.let {
                 ResolutionMode.valueOf(it)
             } ?: ResolutionMode.FULL,
+            captureFormat = preferences[PreferencesKeys.CAPTURE_FORMAT]?.let {
+                try {
+                    CaptureFormat.valueOf(it)
+                } catch (e: IllegalArgumentException) {
+                    CaptureFormat.JPEG
+                }
+            } ?: CaptureFormat.JPEG,
             flashMode = preferences[PreferencesKeys.FLASH_MODE]?.let {
                 FlashMode.valueOf(it)
             } ?: FlashMode.OFF,
@@ -182,6 +190,7 @@ class UserPreferencesManager(private val context: Context) {
             preferences[PreferencesKeys.WHITE_BALANCE] = settings.whiteBalance.name
             preferences[PreferencesKeys.EXPOSURE_COMPENSATION] = settings.exposureCompensation
             preferences[PreferencesKeys.RESOLUTION] = settings.resolution.name
+            preferences[PreferencesKeys.CAPTURE_FORMAT] = settings.captureFormat.name
             preferences[PreferencesKeys.FLASH_MODE] = settings.flashMode.name
             preferences[PreferencesKeys.GRID_OVERLAY] = settings.gridOverlay.name
             preferences[PreferencesKeys.SHOW_HISTOGRAM] = settings.showHistogram

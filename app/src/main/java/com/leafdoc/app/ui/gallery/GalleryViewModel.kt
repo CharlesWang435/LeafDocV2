@@ -29,6 +29,21 @@ class GalleryViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    /**
+     * Maps each session to a cover-image path: the stitched panorama if present,
+     * otherwise the first captured frame (so frames-only sessions still show a thumbnail).
+     */
+    val coverImages: StateFlow<Map<String, String>> = sessions
+        .map { list ->
+            list.mapNotNull { s ->
+                val path = s.stitchedImagePath
+                    ?: sessionRepository.getSegmentsBySessionSync(s.id)
+                        .firstOrNull()?.let { seg -> seg.thumbnailPath ?: seg.imagePath }
+                path?.let { s.id to it }
+            }.toMap()
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
+
     private val _selectedSessions = MutableStateFlow<Set<String>>(emptySet())
     val selectedSessions: StateFlow<Set<String>> = _selectedSessions.asStateFlow()
 

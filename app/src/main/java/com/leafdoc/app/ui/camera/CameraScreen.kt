@@ -99,6 +99,7 @@ fun CameraScreen(
     val cameraState by cameraController?.cameraState?.collectAsState() ?: remember { mutableStateOf(CameraState.Idle) }
     val histogramData by cameraController?.histogramData?.collectAsState() ?: remember { mutableStateOf(null) }
     val currentLens by cameraController?.currentLens?.collectAsState() ?: remember { mutableStateOf(null) }
+    val selectedResolution by cameraController?.selectedResolution?.collectAsState() ?: remember { mutableStateOf<android.util.Size?>(null) }
 
     val permissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -109,7 +110,9 @@ fun CameraScreen(
     )
 
     LaunchedEffect(uiState.sessionComplete) {
-        if (uiState.sessionComplete && uiState.stitchedImagePath != null) {
+        // Navigate when the session is finished — whether the user saved frames only
+        // (no stitched image) or stitched them into a panorama.
+        if (uiState.sessionComplete) {
             uiState.sessionId?.let { sessionId ->
                 onNavigateToResults(sessionId)
                 // Reset state after navigation to prevent stale navigation state
@@ -207,6 +210,8 @@ fun CameraScreen(
                 availableLenses = cameraCapabilities?.availableLenses ?: emptyList(),
                 currentLens = currentLens,
                 onLensSelected = { lens -> cameraController?.switchLens(lens) },
+                selectedResolution = selectedResolution,
+                onResolutionSelected = { size -> cameraController?.selectResolution(size) },
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
                 onGalleryClick = onNavigateToGallery,
@@ -279,7 +284,7 @@ fun CameraScreen(
                         }
                     }
                 },
-                onFinishSession = { viewModel.finishSession() },
+                onFinishSession = { viewModel.finishSessionFramesOnly() },
                 onCancelSession = { viewModel.cancelSession() },
                 onDeleteLast = { viewModel.deleteLastSegment() },
                 onToggleControls = { showProControls = !showProControls },
@@ -373,6 +378,8 @@ private fun TopBar(
     availableLenses: List<LensInfo>,
     currentLens: LensInfo?,
     onLensSelected: (LensInfo) -> Unit,
+    selectedResolution: android.util.Size?,
+    onResolutionSelected: (android.util.Size?) -> Unit,
     showLockControlsPanel: Boolean,
     onToggleLockControlsPanel: () -> Unit,
     cropRectEnabled: Boolean,
@@ -467,6 +474,16 @@ private fun TopBar(
                 availableLenses = availableLenses,
                 currentLens = currentLens,
                 onLensSelected = onLensSelected
+            )
+        }
+
+        // Resolution / megapixel selector (if the current lens offers multiple sizes)
+        val lensSizes = currentLens?.stillSizes ?: emptyList()
+        if (lensSizes.size > 1) {
+            ResolutionSelector(
+                sizes = lensSizes,
+                selected = selectedResolution,
+                onSelected = onResolutionSelected
             )
         }
 
@@ -1469,6 +1486,74 @@ private fun HorizontalToggleButton(
 /**
  * Lens selector dropdown for switching between available camera lenses
  */
+@Composable
+private fun megapixelLabel(size: android.util.Size): String {
+    val mp = (size.width.toLong() * size.height) / 1_000_000.0
+    return if (mp >= 1.0) "${"%.0f".format(mp)}MP" else "${size.width}×${size.height}"
+}
+
+@Composable
+private fun ResolutionSelector(
+    sizes: List<android.util.Size>,
+    selected: android.util.Size?,
+    onSelected: (android.util.Size?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val maxSize = sizes.firstOrNull() // sizes are sorted largest-first
+
+    Box(modifier = modifier) {
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier
+                .size(40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+        ) {
+            // When on Auto, show the actual maximum MP rather than just "Max".
+            Text(
+                text = (selected ?: maxSize)?.let { megapixelLabel(it) } ?: "Max",
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color.Black.copy(alpha = 0.9f))
+        ) {
+            // Auto = largest available (show the real max MP next to it)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = maxSize?.let { "Auto (Max) · ${megapixelLabel(it)} · ${it.width}×${it.height}" }
+                            ?: "Auto (Max)",
+                        color = if (selected == null) Color.Cyan else Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = if (selected == null) FontWeight.Bold else FontWeight.Normal
+                    )
+                },
+                onClick = { onSelected(null); expanded = false }
+            )
+            sizes.forEach { size ->
+                val isSel = selected?.width == size.width && selected?.height == size.height
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = "${megapixelLabel(size)}  ·  ${size.width}×${size.height}",
+                            color = if (isSel) Color.Cyan else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = { onSelected(size); expanded = false }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun LensSelector(
     availableLenses: List<LensInfo>,

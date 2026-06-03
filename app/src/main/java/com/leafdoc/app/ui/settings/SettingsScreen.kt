@@ -107,16 +107,15 @@ fun SettingsScreen(
 
             // Camera Settings Section
             SettingsSection(title = "Camera") {
-                // Capture Format
+                // Capture Format (only formats viewable/analyzable in-app: JPEG, PNG.
+                // TIFF and RAW are offered at export time, not capture.)
+                val captureFormats = remember { CaptureFormat.entries.filter { it.isAvailable } }
                 SettingsDropdown(
                     label = "Capture Format",
                     value = cameraSettings.captureFormat.displayName,
-                    options = CaptureFormat.entries.map { it.displayName },
+                    options = captureFormats.map { it.displayName },
                     onSelect = { index ->
-                        val selectedFormat = CaptureFormat.entries[index]
-                        if (selectedFormat.isAvailable) {
-                            viewModel.updateCaptureFormat(selectedFormat)
-                        }
+                        viewModel.updateCaptureFormat(captureFormats[index])
                     },
                     icon = Icons.Default.Image
                 )

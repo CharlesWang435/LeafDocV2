@@ -115,10 +115,12 @@ fun ResultsScreen(
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Image Preview
+                // Image Preview — falls back to the first frame when there's no stitched image
+                val mainImagePath = session!!.stitchedImagePath ?: segments.firstOrNull()?.imagePath
                 ImagePreviewCard(
-                    imagePath = session!!.stitchedImagePath,
+                    imagePath = mainImagePath,
                     segmentCount = session!!.segmentCount,
+                    isStitched = session!!.stitchedImagePath != null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1.5f)
@@ -129,6 +131,8 @@ fun ResultsScreen(
                 if (segments.size > 1) {
                     IndividualFramesCard(
                         segments = segments,
+                        isAnalyzing = uiState.isAnalyzing,
+                        onDiagnoseFrame = { path -> viewModel.analyzeDiagnosis(path) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
@@ -137,10 +141,11 @@ fun ResultsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Edit Alignment Card (only show if multiple segments)
+                // Stitch / Edit Alignment Card (only show if multiple segments)
                 if (segments.size > 1) {
                     EditAlignmentCard(
                         segmentCount = segments.size,
+                        isStitched = session!!.stitchedImagePath != null,
                         isLoading = uiState.isLoading,
                         onEditAlignment = { viewModel.prepareForAlignment() },
                         modifier = Modifier
@@ -166,6 +171,7 @@ fun ResultsScreen(
                     session = session!!,
                     diagnosis = diagnosis,
                     isAnalyzing = uiState.isAnalyzing,
+                    canAnalyze = mainImagePath != null,
                     onAnalyze = { viewModel.analyzeDiagnosis() },
                     onReanalyze = { showReanalyzeDialog = true },
                     modifier = Modifier
@@ -292,6 +298,7 @@ fun ResultsScreen(
 private fun ImagePreviewCard(
     imagePath: String?,
     segmentCount: Int,
+    isStitched: Boolean,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -302,7 +309,7 @@ private fun ImagePreviewCard(
             if (imagePath != null) {
                 ClickableZoomableImage(
                     imagePath = imagePath,
-                    contentDescription = "Stitched leaf image - tap to zoom",
+                    contentDescription = if (isStitched) "Stitched leaf image - tap to zoom" else "Captured frame - tap to zoom",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
@@ -420,6 +427,7 @@ private fun DiagnosisCard(
     session: LeafSession,
     diagnosis: DiagnosisDisplay?,
     isAnalyzing: Boolean,
+    canAnalyze: Boolean,
     onAnalyze: () -> Unit,
     onReanalyze: () -> Unit,
     modifier: Modifier = Modifier
@@ -584,7 +592,7 @@ private fun DiagnosisCard(
                 // Analyze button
                 Button(
                     onClick = onAnalyze,
-                    enabled = !isAnalyzing && session.stitchedImagePath != null,
+                    enabled = !isAnalyzing && canAnalyze,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (isAnalyzing) {
@@ -603,7 +611,10 @@ private fun DiagnosisCard(
                 }
 
                 Text(
-                    text = "Send the stitched image to our cloud AI for disease detection and health assessment.",
+                    text = "Send the image to our cloud AI for disease detection and health assessment." +
+                        if (session.stitchedImagePath == null && session.segmentCount > 1)
+                            " Tip: pick a representative frame below to analyze it specifically."
+                        else "",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
@@ -682,6 +693,8 @@ private fun HealthScoreIndicator(
 @Composable
 private fun IndividualFramesCard(
     segments: List<LeafSegment>,
+    isAnalyzing: Boolean,
+    onDiagnoseFrame: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
@@ -695,7 +708,7 @@ private fun IndividualFramesCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "${segments.size} captured frames - tap to zoom",
+                text = "${segments.size} captured frames - tap to zoom, or diagnose one",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -708,53 +721,70 @@ private fun IndividualFramesCard(
             ) {
                 items(segments) { segment ->
                     val index = segments.indexOf(segment)
-                    Box(
-                        modifier = Modifier
-                            .size(120.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    Column(
+                        modifier = Modifier.width(120.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Use ClickableZoomableImage for zoom support
-                        ClickableZoomableImage(
-                            imagePath = segment.imagePath,
-                            contentDescription = "Frame ${index + 1}",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-
-                        // Frame label overlay
-                        Surface(
+                        Box(
                             modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(4.dp),
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color.Black.copy(alpha = 0.7f)
+                                .size(120.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            Text(
-                                text = segment.frameLabel ?: "Frame ${index + 1}",
-                                fontSize = 10.sp,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            // Use ClickableZoomableImage for zoom support
+                            ClickableZoomableImage(
+                                imagePath = segment.imagePath,
+                                contentDescription = "Frame ${index + 1}",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+
+                            // Frame label overlay
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(4.dp),
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.Black.copy(alpha = 0.7f)
+                            ) {
+                                Text(
+                                    text = segment.frameLabel ?: "Frame ${index + 1}",
+                                    fontSize = 10.sp,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            // Zoom hint overlay (subtle)
+                            Icon(
+                                imageVector = Icons.Default.ZoomIn,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .size(16.dp),
+                                tint = Color.White.copy(alpha = 0.6f)
                             )
                         }
 
-                        // Zoom hint overlay (subtle)
-                        Icon(
-                            imageVector = Icons.Default.ZoomIn,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(4.dp)
-                                .size(16.dp),
-                            tint = Color.White.copy(alpha = 0.6f)
-                        )
+                        TextButton(
+                            onClick = { onDiagnoseFrame(segment.imagePath) },
+                            enabled = !isAnalyzing,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Science,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Diagnose", fontSize = 11.sp)
+                        }
                     }
                 }
             }
         }
     }
-
-    // Fullscreen viewer for individual frames - removed since ClickableZoomableImage now handles this
 }
 
 @Composable
@@ -793,6 +823,10 @@ private fun ExportCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Un-stitched sessions default to exporting individual frames.
+            val effectiveMode = if (session.stitchedImagePath == null)
+                ExportMode.FRAMES_ONLY else settings.exportMode
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -802,12 +836,12 @@ private fun ExportCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = settings.exportMode.displayName,
+                    text = effectiveMode.displayName,
                     fontWeight = FontWeight.Medium
                 )
             }
 
-            if (settings.exportMode != ExportMode.STITCHED_ONLY && segments.isNotEmpty()) {
+            if (effectiveMode != ExportMode.STITCHED_ONLY && segments.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Frames: ${segments.size}",
@@ -889,7 +923,12 @@ private fun ExportDialog(
     onExport: (ExportMode, ImageFormat) -> Unit
 ) {
     var selectedFormat by remember { mutableStateOf(currentSettings.format) }
-    var selectedMode by remember { mutableStateOf(currentSettings.exportMode) }
+    // Default to individual frames when this session was never stitched.
+    var selectedMode by remember {
+        mutableStateOf(
+            if (session.stitchedImagePath == null) ExportMode.FRAMES_ONLY else currentSettings.exportMode
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -984,6 +1023,7 @@ private fun ExportDialog(
 @Composable
 private fun EditAlignmentCard(
     segmentCount: Int,
+    isStitched: Boolean,
     isLoading: Boolean,
     onEditAlignment: () -> Unit,
     modifier: Modifier = Modifier
@@ -1004,12 +1044,15 @@ private fun EditAlignmentCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Edit Alignment",
+                    text = if (isStitched) "Edit Alignment" else "Stitch Frames",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
                 Text(
-                    text = "Adjust Y position of $segmentCount segments",
+                    text = if (isStitched)
+                        "Adjust Y position of $segmentCount segments"
+                    else
+                        "Combine $segmentCount frames into one panorama",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1028,13 +1071,13 @@ private fun EditAlignmentCard(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.Tune,
+                        imageVector = if (isStitched) Icons.Default.Tune else Icons.Default.Layers,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = if (isLoading) "Loading..." else "Adjust")
+                Text(text = if (isLoading) "Loading..." else if (isStitched) "Adjust" else "Stitch")
             }
         }
     }

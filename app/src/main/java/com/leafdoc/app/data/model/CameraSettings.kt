@@ -97,8 +97,13 @@ enum class CaptureFormat(
     val displayName: String,
     val fileExtension: String,
     val bitDepth: Int,
+    val isLossless: Boolean = false,
     val isAvailable: Boolean = true
 ) {
-    JPEG("JPEG (8-bit)", "jpg", 8, isAvailable = true),
-    RAW_DNG("RAW DNG (16-bit) - Coming Soon", "dng", 16, isAvailable = false)
+    // JPEG and PNG are first-class capture formats (display, AI, and stitching all work).
+    // TIFF is export-only (Android can't decode TIFF in-app); RAW/DNG is a Phase-5 capture path.
+    JPEG("JPEG (max quality)", "jpg", 8, isLossless = false, isAvailable = true),
+    PNG("PNG (lossless 8-bit)", "png", 8, isLossless = true, isAvailable = true),
+    TIFF("TIFF (lossless, export only)", "tiff", 8, isLossless = true, isAvailable = false),
+    RAW_DNG("RAW DNG (16-bit) - Coming Soon", "dng", 16, isLossless = true, isAvailable = false)
 }

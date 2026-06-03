@@ -88,10 +88,22 @@ class ResultsViewModel @Inject constructor(
         }
     }
 
-    fun analyzeDiagnosis() {
+    /**
+     * The image used for whole-session actions (diagnosis, share) when no specific
+     * frame is chosen: the stitched panorama if present, otherwise the first segment.
+     */
+    private fun mainImagePath(): String? =
+        session.value?.stitchedImagePath ?: segments.value.firstOrNull()?.imagePath
+
+    /**
+     * Analyze the session. Pass [segmentPath] to diagnose a specific captured frame
+     * (used for frames-only sessions where the user picks a representative frame);
+     * otherwise the stitched image or first segment is used.
+     */
+    fun analyzeDiagnosis(segmentPath: String? = null) {
         viewModelScope.launch {
             val sess = session.value ?: return@launch
-            val imagePath = sess.stitchedImagePath ?: return@launch
+            val imagePath = segmentPath ?: mainImagePath() ?: return@launch
 
             _uiState.update { it.copy(isAnalyzing = true, error = null) }
 
@@ -123,10 +135,10 @@ class ResultsViewModel @Inject constructor(
     /**
      * Reanalyze the leaf with a specific AI model and prompt template.
      */
-    fun reanalyzeDiagnosis(provider: AiProviderType, promptId: String) {
+    fun reanalyzeDiagnosis(provider: AiProviderType, promptId: String, segmentPath: String? = null) {
         viewModelScope.launch {
             val sess = session.value ?: return@launch
-            val imagePath = sess.stitchedImagePath ?: return@launch
+            val imagePath = segmentPath ?: mainImagePath() ?: return@launch
 
             // Check if provider is configured
             if (!aiProviderFactory.isProviderConfigured(provider)) {
@@ -337,8 +349,8 @@ class ResultsViewModel @Inject constructor(
 
     fun shareImage() {
         viewModelScope.launch {
-            val sess = session.value ?: return@launch
-            val imagePath = sess.stitchedImagePath ?: return@launch
+            session.value ?: return@launch
+            val imagePath = mainImagePath() ?: return@launch
 
             try {
                 val uri = imageRepository.getImageUri(imagePath)
