@@ -43,6 +43,10 @@ interface LeafSessionDao {
     @Query("UPDATE leaf_sessions SET stitchedImagePath = :imagePath, isComplete = 1, updatedAt = :timestamp WHERE id = :sessionId")
     suspend fun completeSession(sessionId: String, imagePath: String, timestamp: Long = System.currentTimeMillis())
 
+    /** Marks a session complete without a stitched image (frames-only session). */
+    @Query("UPDATE leaf_sessions SET isComplete = 1, updatedAt = :timestamp WHERE id = :sessionId")
+    suspend fun markComplete(sessionId: String, timestamp: Long = System.currentTimeMillis())
+
     @Query("UPDATE leaf_sessions SET diagnosisStatus = :status, diagnosisResult = :result, diagnosisConfidence = :confidence, updatedAt = :timestamp WHERE id = :sessionId")
     suspend fun updateDiagnosis(
         sessionId: String,

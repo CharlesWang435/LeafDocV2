@@ -64,6 +64,11 @@ class LeafSessionRepository @Inject constructor(
         sessionDao.completeSession(sessionId, stitchedImagePath)
     }
 
+    /** Completes a session without stitching — keeps only the individual segments. */
+    suspend fun completeSessionWithoutStitch(sessionId: String) {
+        sessionDao.markComplete(sessionId)
+    }
+
     suspend fun updateDiagnosis(
         sessionId: String,
         status: DiagnosisStatus,

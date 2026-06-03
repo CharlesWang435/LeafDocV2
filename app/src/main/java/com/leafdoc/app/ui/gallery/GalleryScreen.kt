@@ -45,6 +45,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel()
 ) {
     val sessions by viewModel.sessions.collectAsState()
+    val coverImages by viewModel.coverImages.collectAsState()
     val filter by viewModel.filter.collectAsState()
     val selectedSessions by viewModel.selectedSessions.collectAsState()
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
@@ -147,6 +148,7 @@ fun GalleryScreen(
                 items(sessions, key = { it.id }) { session ->
                     SessionCard(
                         session = session,
+                        coverImagePath = coverImages[session.id],
                         isSelected = session.id in selectedSessions,
                         isSelectionMode = isSelectionMode,
                         onClick = {
@@ -208,6 +210,7 @@ fun GalleryScreen(
 @Composable
 private fun SessionCard(
     session: LeafSession,
+    coverImagePath: String?,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -240,9 +243,9 @@ private fun SessionCard(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // Image
-            if (session.stitchedImagePath != null) {
+            if (coverImagePath != null) {
                 AsyncImage(
-                    model = session.stitchedImagePath,
+                    model = coverImagePath,
                     contentDescription = "Leaf image - tap to view, long press for options",
                     modifier = Modifier
                         .fillMaxSize()
@@ -362,9 +365,9 @@ private fun SessionCard(
     }
 
     // Zoom dialog with "View Results" button
-    if (showZoomDialog && session.stitchedImagePath != null) {
+    if (showZoomDialog && coverImagePath != null) {
         ZoomableImageDialog(
-            imagePath = session.stitchedImagePath,
+            imagePath = coverImagePath,
             onDismiss = { showZoomDialog = false },
             onViewResults = onNavigateToResults,
             sessionId = session.id

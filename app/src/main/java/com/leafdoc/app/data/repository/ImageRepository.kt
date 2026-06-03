@@ -9,11 +9,13 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
+import com.leafdoc.app.data.model.CaptureFormat
 import com.leafdoc.app.data.model.ExportSettings
 import com.leafdoc.app.data.model.ImageFormat
 import com.leafdoc.app.data.model.ExportLocation
 import com.leafdoc.app.data.model.LeafSession
 import com.leafdoc.app.data.model.LeafSegment
+import com.leafdoc.app.util.TiffWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -53,14 +55,15 @@ class ImageRepository @Inject constructor(
         bitmap: Bitmap,
         sessionId: String,
         segmentIndex: Int,
+        format: CaptureFormat = CaptureFormat.JPEG,
         quality: Int = DEFAULT_JPEG_QUALITY
     ): String = withContext(Dispatchers.IO) {
         val sessionDir = File(segmentsDir, sessionId).apply { mkdirs() }
-        val fileName = "segment_${segmentIndex}_${dateFormat.format(Date())}.jpg"
+        val fileName = "segment_${segmentIndex}_${dateFormat.format(Date())}.${captureExtension(format)}"
         val file = File(sessionDir, fileName)
 
         FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            writeBitmap(bitmap, out, format, quality)
         }
 
         file.absolutePath
@@ -69,16 +72,63 @@ class ImageRepository @Inject constructor(
     suspend fun saveStitchedImage(
         bitmap: Bitmap,
         sessionId: String,
+        format: CaptureFormat = CaptureFormat.JPEG,
         quality: Int = DEFAULT_JPEG_QUALITY
     ): String = withContext(Dispatchers.IO) {
-        val fileName = "stitched_${sessionId}_${dateFormat.format(Date())}.jpg"
+        val fileName = "stitched_${sessionId}_${dateFormat.format(Date())}.${captureExtension(format)}"
         val file = File(stitchedDir, fileName)
 
         FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            writeBitmap(bitmap, out, format, quality)
         }
 
         file.absolutePath
+    }
+
+    /** File extension for a captured segment/stitched image in the given format. */
+    private fun captureExtension(format: CaptureFormat): String = when (format) {
+        CaptureFormat.JPEG -> "jpg"
+        CaptureFormat.PNG -> "png"
+        CaptureFormat.TIFF -> "tiff"
+        CaptureFormat.RAW_DNG -> "jpg" // RAW path handled separately; defensive fallback
+    }
+
+    /** Encodes [bitmap] to [out] in the given capture format (lossless for PNG/TIFF). */
+    private fun writeBitmap(bitmap: Bitmap, out: OutputStream, format: CaptureFormat, quality: Int) {
+        when (format) {
+            CaptureFormat.JPEG -> bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            CaptureFormat.PNG -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            CaptureFormat.TIFF -> TiffWriter.write(bitmap, out)
+            CaptureFormat.RAW_DNG -> bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        }
+    }
+
+    /**
+     * Creates a displayable JPEG thumbnail directly from an in-memory bitmap.
+     * Used at capture time so PNG/TIFF segments (which Coil/BitmapFactory can't render)
+     * still have a viewable thumbnail in the gallery and results screens.
+     */
+    suspend fun createThumbnailFromBitmap(
+        bitmap: Bitmap,
+        sessionId: String,
+        segmentIndex: Int,
+        maxSize: Int = 256
+    ): String = withContext(Dispatchers.IO) {
+        val thumbnailFile = File(thumbnailDir, "thumb_${sessionId}_${segmentIndex}_${dateFormat.format(Date())}.jpg")
+
+        val scale = (maxOf(bitmap.width, bitmap.height) / maxSize).coerceAtLeast(1)
+        val thumb = if (scale > 1) {
+            Bitmap.createScaledBitmap(bitmap, bitmap.width / scale, bitmap.height / scale, true)
+        } else {
+            bitmap
+        }
+
+        FileOutputStream(thumbnailFile).use { out ->
+            thumb.compress(Bitmap.CompressFormat.JPEG, THUMBNAIL_QUALITY, out)
+        }
+        if (thumb != bitmap) thumb.recycle()
+
+        thumbnailFile.absolutePath
     }
 
     suspend fun createThumbnail(
@@ -274,14 +324,11 @@ class ImageRepository @Inject constructor(
         outputStream: OutputStream,
         settings: ExportSettings
     ) {
-        val format = when (settings.format) {
-            ImageFormat.JPEG -> Bitmap.CompressFormat.JPEG
-            ImageFormat.PNG -> Bitmap.CompressFormat.PNG
-            ImageFormat.TIFF -> Bitmap.CompressFormat.PNG // Android doesn't support TIFF natively
+        when (settings.format) {
+            ImageFormat.JPEG -> bitmap.compress(Bitmap.CompressFormat.JPEG, settings.quality, outputStream)
+            ImageFormat.PNG -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+            ImageFormat.TIFF -> TiffWriter.write(bitmap, outputStream)
         }
-
-        val quality = if (settings.format.supportsQuality) settings.quality else 100
-        bitmap.compress(format, quality, outputStream)
     }
 
     suspend fun deleteSessionImages(sessionId: String) = withContext(Dispatchers.IO) {

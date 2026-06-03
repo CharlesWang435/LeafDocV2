@@ -198,15 +198,22 @@ class CameraViewModel @Inject constructor(
                     capturedImage.bitmap.copy(capturedImage.bitmap.config ?: Bitmap.Config.ARGB_8888, false)
                 }
 
-                // Save cropped image to storage
+                // Save cropped image to storage in the user-selected capture format
+                val captureFormat = _cameraSettings.value.captureFormat
                 imagePath = imageRepository.saveSegmentImage(
+                    bitmap = croppedBitmap,
+                    sessionId = session.id,
+                    segmentIndex = segmentIndex,
+                    format = captureFormat
+                )
+
+                // Create a displayable JPEG thumbnail straight from the bitmap so PNG/TIFF
+                // segments (which Coil can't render) still show in the gallery and results.
+                thumbnailPath = imageRepository.createThumbnailFromBitmap(
                     bitmap = croppedBitmap,
                     sessionId = session.id,
                     segmentIndex = segmentIndex
                 )
-
-                // Create thumbnail
-                thumbnailPath = imageRepository.createThumbnail(imagePath)
 
                 // Use fixed overlap percentage from settings (no auto-calculation)
                 val overlap = overlapPercentage.value / 100f
@@ -391,6 +398,42 @@ class CameraViewModel @Inject constructor(
                 _uiState.update { it.copy(
                     isProcessing = false,
                     error = "Failed to load images: ${e.message}"
+                )}
+            }
+        }
+    }
+
+    /**
+     * Completes the session keeping only the individual full-resolution segments,
+     * without stitching them into a panorama. This is the default "Save frames" path —
+     * stitching becomes an optional step the user can run later from the results screen.
+     */
+    fun finishSessionFramesOnly() {
+        viewModelScope.launch {
+            val session = currentSession ?: return@launch
+            val segments = _capturedSegments.value
+
+            if (segments.isEmpty()) {
+                _uiState.update { it.copy(error = "No segments captured") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isProcessing = true, message = "Saving frames...") }
+
+            try {
+                sessionRepository.completeSessionWithoutStitch(session.id)
+
+                _uiState.update { it.copy(
+                    isProcessing = false,
+                    sessionActive = false,
+                    sessionComplete = true,
+                    stitchedImagePath = null,
+                    message = "${segments.size} frame${if (segments.size != 1) "s" else ""} saved!"
+                )}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(
+                    isProcessing = false,
+                    error = "Failed to save frames: ${e.message}"
                 )}
             }
         }

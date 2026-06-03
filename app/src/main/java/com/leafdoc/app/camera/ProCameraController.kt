@@ -16,6 +16,8 @@ import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -62,6 +64,10 @@ class ProCameraController(
 
     private val _currentLens = MutableStateFlow<LensInfo?>(null)
     val currentLens: StateFlow<LensInfo?> = _currentLens.asStateFlow()
+
+    // User-selected still-capture resolution for the current lens; null = auto (largest available).
+    private val _selectedResolution = MutableStateFlow<Size?>(null)
+    val selectedResolution: StateFlow<Size?> = _selectedResolution.asStateFlow()
 
     private var frameAnalyzer: FrameAnalyzer? = null
     private var lifecycleOwner: LifecycleOwner? = null
@@ -185,6 +191,12 @@ class ProCameraController(
         val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
             ?: CameraCharacteristics.LENS_FACING_BACK
 
+        // Available still (JPEG) sizes for THIS lens, largest first.
+        val stillSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(ImageFormat.JPEG)
+            ?.sortedByDescending { it.width.toLong() * it.height }
+            ?: emptyList()
+
         return LensInfo(
             id = cameraId,
             lensFacing = lensFacing,
@@ -192,7 +204,8 @@ class ProCameraController(
             focalLength = focalLength,
             physicalSize = sensorSize,
             zoomRatio = zoomRatio,
-            displayName = displayName
+            displayName = displayName,
+            stillSizes = stillSizes
         )
     }
 
@@ -285,45 +298,36 @@ class ProCameraController(
         preview = Preview.Builder()
             .build()
 
-        // Image Capture - Enhanced for maximum quality
-        val capabilities = _cameraCapabilities.value
-        val maxResolution = capabilities?.availableResolutions?.maxByOrNull { it.width * it.height }
+        // Available still sizes for the CURRENT lens (falls back to the primary camera's list).
+        val lensSizes = _currentLens.value?.stillSizes?.takeIf { it.isNotEmpty() }
+            ?: _cameraCapabilities.value?.availableResolutions
+            ?: emptyList()
+        val maxForLens = lensSizes.maxByOrNull { it.width.toLong() * it.height }
 
-        val targetResolution = when (settings.resolution) {
-            ResolutionMode.FULL -> maxResolution  // Use device's maximum resolution
-            ResolutionMode.HIGH -> maxResolution?.let { Size(it.width * 3 / 4, it.height * 3 / 4) } ?: Size(4000, 3000)
-            ResolutionMode.MEDIUM -> maxResolution?.let { Size(it.width / 2, it.height / 2) } ?: Size(3264, 2448)
+        // Resolution priority: explicit user pick > ResolutionMode preset > largest available.
+        val target: Size? = _selectedResolution.value ?: when (settings.resolution) {
+            ResolutionMode.FULL -> maxForLens
+            ResolutionMode.HIGH -> maxForLens?.let { Size(it.width * 3 / 4, it.height * 3 / 4) }
+            ResolutionMode.MEDIUM -> maxForLens?.let { Size(it.width / 2, it.height / 2) }
             ResolutionMode.LOW -> Size(2048, 1536)
         }
 
+        // CameraX always captures a JPEG from the sensor; PNG/TIFF are produced by re-encoding
+        // the decoded bitmap at save time. True RAW/DNG is a separate Camera2 path (Phase 5).
+        val resolutionSelector = ResolutionSelector.Builder().apply {
+            if (target != null) {
+                setResolutionStrategy(
+                    ResolutionStrategy(target, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+                )
+            } else {
+                setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+            }
+        }.build()
+
         val imageCaptureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-
-        // Configure format based on settings
-        when (settings.captureFormat) {
-            CaptureFormat.JPEG -> {
-                // 8-bit JPEG at maximum quality
-                imageCaptureBuilder
-                    .setJpegQuality(100)  // Maximum JPEG quality for detailed scientific imaging
-                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-            }
-            CaptureFormat.RAW_DNG -> {
-                // RAW/DNG capture - currently in development
-                // For now, fall back to JPEG. RAW implementation requires Camera2 API
-                // and DNG writer, which will be added in a future update
-                imageCaptureBuilder
-                    .setJpegQuality(100)
-                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                timber.log.Timber.w("RAW capture requested but not yet implemented, using JPEG")
-            }
-        }
-
-        // Set target resolution for non-FULL modes
-        if (settings.resolution != ResolutionMode.FULL) {
-            targetResolution?.let {
-                imageCaptureBuilder.setTargetResolution(it)
-            }
-        }
+            .setJpegQuality(100)  // Maximum JPEG quality for detailed scientific imaging
+            .setResolutionSelector(resolutionSelector)
 
         imageCapture = imageCaptureBuilder.build()
 
@@ -390,9 +394,25 @@ class ProCameraController(
         val view = previewView ?: return
 
         _currentLens.value = lensInfo
+        // Sizes differ per lens, so reset to that lens's maximum and rebuild the capture use case.
+        _selectedResolution.value = null
+        buildUseCases(_currentSettings.value)
         bindCamera(owner, view, lensInfo.id)
 
         // Reapply current settings to new camera
+        applySettings(_currentSettings.value)
+    }
+
+    /**
+     * Selects an explicit still-capture resolution for the current lens (null = auto/largest).
+     * Rebuilds the capture use case and re-binds so the change takes effect immediately.
+     */
+    fun selectResolution(size: Size?) {
+        _selectedResolution.value = size
+        val owner = lifecycleOwner ?: return
+        val view = previewView ?: return
+        buildUseCases(_currentSettings.value)
+        bindCamera(owner, view, _currentLens.value?.id)
         applySettings(_currentSettings.value)
     }
 
@@ -657,7 +677,8 @@ data class LensInfo(
     val focalLength: Float,
     val physicalSize: android.util.SizeF?,
     val zoomRatio: Float,
-    val displayName: String
+    val displayName: String,
+    val stillSizes: List<Size> = emptyList()
 )
 
 enum class LensType {
