@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.leafdoc.app.ui.camera.CameraScreen
+import com.leafdoc.app.ui.dashboard.DashboardScreen
 import com.leafdoc.app.ui.gallery.GalleryScreen
 import com.leafdoc.app.ui.results.ResultsScreen
 import com.leafdoc.app.ui.settings.AiSettingsScreen
@@ -17,6 +18,7 @@ sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
     data object AiSettings : Screen("ai_settings")
+    data object Dashboard : Screen("dashboard")
     data object Results : Screen("results/{sessionId}") {
         fun createRoute(sessionId: String) = "results/$sessionId"
     }
@@ -46,7 +48,16 @@ fun NavGraph(
                         popUpTo(Screen.Camera.route) { inclusive = false }
                         launchSingleTop = true
                     }
+                },
+                onNavigateToDashboard = {
+                    navController.navigate(Screen.Dashboard.route)
                 }
+            )
+        }
+
+        composable(Screen.Dashboard.route) {
+            DashboardScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 

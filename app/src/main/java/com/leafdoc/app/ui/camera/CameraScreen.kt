@@ -62,6 +62,7 @@ fun CameraScreen(
     onNavigateToGallery: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToResults: (String) -> Unit,
+    onNavigateToDashboard: () -> Unit,
     viewModel: CameraViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -175,6 +176,10 @@ fun CameraScreen(
                         // FIT_CENTER shows the entire captured frame (letterboxed top/bottom),
                         // so the preview matches the final image aspect ratio (WYSIWYG).
                         scaleType = PreviewView.ScaleType.FIT_CENTER
+                        // COMPATIBLE (TextureView) composites correctly through navigation
+                        // transitions. The default SurfaceView mode can leave a black screen
+                        // when navigating to/from the camera on some devices.
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         previewView = this
 
                         // Track preview dimensions
@@ -258,7 +263,7 @@ fun CameraScreen(
                 onToggleFocus = { showFocusPanel = !showFocusPanel },
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
-                onGalleryClick = onNavigateToGallery,
+                onDashboardClick = onNavigateToDashboard,
                 showLockControlsPanel = showLockControlsPanel,
                 onToggleLockControlsPanel = { showLockControlsPanel = !showLockControlsPanel },
                 cropRectEnabled = cropRectEnabled,
@@ -321,6 +326,7 @@ fun CameraScreen(
                 isStitching = uiState.isStitching,
                 cameraState = cameraState,
                 lastThumbnail = uiState.lastCapturedThumbnail,
+                onGalleryClick = onNavigateToGallery,
                 onStartSession = { showSessionDialog = true },
                 onCapture = {
                     scope.launch {
@@ -514,7 +520,7 @@ private fun TopBar(
     sessionActive: Boolean,
     segmentCount: Int,
     onSettingsClick: () -> Unit,
-    onGalleryClick: () -> Unit,
+    onDashboardClick: () -> Unit,
     currentLens: LensInfo?,
     zoomRatio: Float,
     zoomRange: Pair<Float, Float>,
@@ -546,16 +552,16 @@ private fun TopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Gallery (top-left)
+        // Dashboard / overview (top-left)
         IconButton(
-            onClick = onGalleryClick,
+            onClick = onDashboardClick,
             modifier = Modifier
                 .size(40.dp)
                 .background(Color.Black.copy(alpha = 0.5f), CircleShape)
         ) {
             Icon(
-                imageVector = Icons.Default.PhotoLibrary,
-                contentDescription = "Gallery",
+                imageVector = Icons.Default.Insights,
+                contentDescription = "Overview",
                 tint = Color.White
             )
         }
@@ -708,6 +714,7 @@ private fun BottomControls(
     isStitching: Boolean,
     cameraState: CameraState,
     lastThumbnail: String?,
+    onGalleryClick: () -> Unit,
     onStartSession: () -> Unit,
     onCapture: () -> Unit,
     onFinishSession: () -> Unit,
@@ -745,7 +752,19 @@ private fun BottomControls(
                     )
                 }
             } else {
-                Spacer(modifier = Modifier.size(48.dp))
+                // Idle: bottom-left opens the gallery
+                IconButton(
+                    onClick = onGalleryClick,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoLibrary,
+                        contentDescription = "Gallery",
+                        tint = Color.White
+                    )
+                }
             }
 
             // Capture button (shutter in capture mode) OR a labeled "Start Session" button.
