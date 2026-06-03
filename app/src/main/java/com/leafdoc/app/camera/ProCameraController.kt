@@ -415,12 +415,13 @@ class ProCameraController(
             // Use specific camera by ID (for multi-lens support)
             try {
                 CameraSelector.Builder()
+                    .requireLensFacing(CameraSelector.LENS_FACING_BACK)
                     .addCameraFilter { cameras ->
                         val filtered = cameras.filter { cameraInfo ->
                             val info = Camera2CameraInfo.from(cameraInfo)
                             info.cameraId == cameraId
                         }
-                        // If filter returns empty, fall back to all cameras
+                        // If the specific ID isn't found, keep the (back-facing) candidates.
                         if (filtered.isEmpty()) cameras else filtered
                     }
                     .build()

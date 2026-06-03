@@ -333,6 +333,9 @@ class CameraViewModel @Inject constructor(
                 )}
             } finally {
                 croppedBitmap?.recycle()
+                // Recycle the original full-resolution capture once consumed (it is distinct from
+                // croppedBitmap, which is a crop/copy) to avoid leaking large bitmaps across captures.
+                capturedImage.bitmap?.let { if (!it.isRecycled) it.recycle() }
             }
         }
     }

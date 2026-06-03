@@ -41,7 +41,16 @@ fun SettingsScreen(
     val midribSearchTolerance by viewModel.midribSearchTolerance.collectAsState()
     val midribGuideEnabled by viewModel.midribGuideEnabled.collectAsState()
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let { snackbarHostState.showSnackbar(it); viewModel.clearMessage() }
+    }
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { snackbarHostState.showSnackbar(it); viewModel.clearError() }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -414,12 +423,12 @@ private fun EditableOptionList(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(opt, style = MaterialTheme.typography.bodyMedium)
-                    IconButton(onClick = { onRemove(opt) }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { onRemove(opt) }, modifier = Modifier.size(44.dp)) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "Remove $opt",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }

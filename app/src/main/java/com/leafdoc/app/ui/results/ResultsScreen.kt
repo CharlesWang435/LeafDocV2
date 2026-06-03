@@ -54,6 +54,7 @@ fun ResultsScreen(
     var showExportDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showReanalyzeDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Handle session deletion
     LaunchedEffect(uiState.sessionDeleted) {
@@ -76,6 +77,7 @@ fun ResultsScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Leaf Analysis") },
@@ -286,11 +288,17 @@ fun ResultsScreen(
     }
 
     // Error/Success Snackbars
-    uiState.error?.let { error ->
-        // Show error
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
     }
-    uiState.message?.let { message ->
-        // Show message
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessage()
+        }
     }
 }
 
@@ -354,7 +362,7 @@ private fun ImagePreviewCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "$segmentCount segments",
+                        text = "$segmentCount ${if (segmentCount == 1) "frame" else "frames"}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -871,26 +879,17 @@ private fun ExportCard(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Success message with share button
-            uiState.message?.let { msg ->
-                Text(
-                    text = msg,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (uiState.exportedUris.isNotEmpty()) {
-                    Button(
-                        onClick = onShareClick,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share ${uiState.exportedUris.size} Image${if (uiState.exportedUris.size != 1) "s" else ""}")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
+            // Share button for the most recent export (independent of the transient message)
+            if (uiState.exportedUris.isNotEmpty()) {
+                Button(
+                    onClick = onShareClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Share ${uiState.exportedUris.size} Image${if (uiState.exportedUris.size != 1) "s" else ""}")
                 }
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             // Export button
