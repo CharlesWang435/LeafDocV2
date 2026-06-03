@@ -41,7 +41,9 @@ class ChatGptAiProvider @Inject constructor(
         bitmap: Bitmap,
         promptText: String,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        temperature: Float,
+        maxTokens: Int
     ): Result<DiagnosisDisplay> = withContext(Dispatchers.IO) {
         return@withContext try {
             // Convert bitmap to base64
@@ -67,8 +69,8 @@ class ChatGptAiProvider @Inject constructor(
                         )
                     )
                 ),
-                maxTokens = 2048,
-                temperature = 0.2
+                maxTokens = maxTokens,
+                temperature = temperature.toDouble()
             )
 
             val requestBodyJson = gson.toJson(requestBody)
@@ -85,11 +87,11 @@ class ChatGptAiProvider @Inject constructor(
                     ?: throw Exception("Empty response from OpenAI")
 
                 if (!response.isSuccessful) {
-                    Timber.e("OpenAI API error: ${response.code} - $responseBody")
+                    Timber.e("OpenAI API error: ${response.code} ${response.message}")
                     throw Exception("OpenAI API error: ${response.code} - ${response.message}")
                 }
 
-                Timber.d("OpenAI response: $responseBody")
+                Timber.d("OpenAI response received (%d chars)", responseBody.length)
 
                 parseOpenAiResponse(sessionId, responseBody)
             }

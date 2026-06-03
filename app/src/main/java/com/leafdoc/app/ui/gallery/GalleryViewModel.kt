@@ -83,8 +83,9 @@ class GalleryViewModel @Inject constructor(
 
             try {
                 _selectedSessions.value.forEach { sessionId ->
-                    sessionRepository.deleteSession(sessionId)
+                    // Files before the row — avoids orphaning files if interrupted mid-delete.
                     imageRepository.deleteSessionImages(sessionId)
+                    sessionRepository.deleteSession(sessionId)
                 }
                 _selectedSessions.value = emptySet()
                 _uiState.update { it.copy(
@@ -103,8 +104,9 @@ class GalleryViewModel @Inject constructor(
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
             try {
-                sessionRepository.deleteSession(sessionId)
+                // Files before the row — avoids orphaning files if interrupted mid-delete.
                 imageRepository.deleteSessionImages(sessionId)
+                sessionRepository.deleteSession(sessionId)
                 _uiState.update { it.copy(message = "Session deleted") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = "Failed to delete: ${e.message}") }

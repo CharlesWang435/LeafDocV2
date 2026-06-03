@@ -78,7 +78,9 @@ class DiagnosisRepository @Inject constructor(
                 bitmap = bitmap,
                 promptText = promptText,
                 latitude = latitude,
-                longitude = longitude
+                longitude = longitude,
+                temperature = promptTemplate.temperature,
+                maxTokens = promptTemplate.maxTokens
             )
 
             bitmap.recycle()
@@ -146,7 +148,9 @@ class DiagnosisRepository @Inject constructor(
                 bitmap = resizedBitmap,
                 promptText = promptText,
                 latitude = latitude,
-                longitude = longitude
+                longitude = longitude,
+                temperature = promptTemplate.temperature,
+                maxTokens = promptTemplate.maxTokens
             )
 
             if (resizedBitmap != bitmap) {

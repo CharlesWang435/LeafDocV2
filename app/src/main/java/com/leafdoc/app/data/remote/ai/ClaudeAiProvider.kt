@@ -42,7 +42,9 @@ class ClaudeAiProvider @Inject constructor(
         bitmap: Bitmap,
         promptText: String,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        temperature: Float,
+        maxTokens: Int
     ): Result<DiagnosisDisplay> = withContext(Dispatchers.IO) {
         return@withContext try {
             // Convert bitmap to base64
@@ -51,7 +53,8 @@ class ClaudeAiProvider @Inject constructor(
             // Build Claude API request
             val requestBody = ClaudeRequest(
                 model = CLAUDE_MODEL,
-                maxTokens = 2048,
+                maxTokens = maxTokens,
+                temperature = temperature,
                 messages = listOf(
                     ClaudeMessage(
                         role = "user",
@@ -88,11 +91,11 @@ class ClaudeAiProvider @Inject constructor(
                     ?: throw Exception("Empty response from Claude")
 
                 if (!response.isSuccessful) {
-                    Timber.e("Claude API error: ${response.code} - $responseBody")
+                    Timber.e("Claude API error: ${response.code} ${response.message}")
                     throw Exception("Claude API error: ${response.code} - ${response.message}")
                 }
 
-                Timber.d("Claude response: $responseBody")
+                Timber.d("Claude response received (%d chars)", responseBody.length)
 
                 parseClaudeResponse(sessionId, responseBody)
             }
@@ -203,6 +206,7 @@ private data class ClaudeRequest(
     val model: String,
     @SerializedName("max_tokens")
     val maxTokens: Int,
+    val temperature: Float,
     val messages: List<ClaudeMessage>
 )
 

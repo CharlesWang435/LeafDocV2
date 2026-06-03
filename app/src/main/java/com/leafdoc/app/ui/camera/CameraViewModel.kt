@@ -50,8 +50,14 @@ class CameraViewModel @Inject constructor(
     private val _showManualAlignment = MutableStateFlow(false)
     val showManualAlignment: StateFlow<Boolean> = _showManualAlignment.asStateFlow()
 
-    private val _alignmentBitmaps = MutableStateFlow<List<Bitmap>>(emptyList())
-    val alignmentBitmaps: StateFlow<List<Bitmap>> = _alignmentBitmaps.asStateFlow()
+    // Decoded full-res images used ONLY for offset detection / preview / stitching. Never rendered
+    // by the UI — the alignment screen renders [alignmentPaths] via Coil — so recycling these in
+    // clearAlignmentBitmaps() can't race composition.
+    private var alignmentBitmaps: List<Bitmap> = emptyList()
+
+    // Display paths the alignment screen renders (kept index-aligned with alignmentBitmaps).
+    private val _alignmentPaths = MutableStateFlow<List<String>>(emptyList())
+    val alignmentPaths: StateFlow<List<String>> = _alignmentPaths.asStateFlow()
 
     val overlapPercentage: StateFlow<Int> = preferencesManager.overlapGuidePercentage
         .stateIn(viewModelScope, SharingStarted.Eagerly, 10)
@@ -111,9 +117,17 @@ class CameraViewModel @Inject constructor(
     val treatmentOptions: StateFlow<List<String>> = preferencesManager.treatmentOptions
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    // The captured image awaiting Retake/Export review in Simple mode.
+    // The captured image awaiting Retake/Export review in Simple mode. The bitmap is kept ONLY
+    // for export; the review overlay renders [pendingReviewPath] via Coil instead of the live
+    // bitmap, so recycling it on retake/export can't crash composition.
     private val _pendingCapture = MutableStateFlow<CapturedImage?>(null)
     val pendingCapture: StateFlow<CapturedImage?> = _pendingCapture.asStateFlow()
+
+    // File path the review overlay renders (the on-disk capture, or a temp preview written from
+    // an in-memory standard capture). Cleaned up on retake/export/mode-exit.
+    private val _pendingReviewPath = MutableStateFlow<String?>(null)
+    val pendingReviewPath: StateFlow<String?> = _pendingReviewPath.asStateFlow()
+    private var pendingTempPreview: java.io.File? = null
 
     private val exportSettings: StateFlow<ExportSettings> = preferencesManager.exportSettings
         .stateIn(viewModelScope, SharingStarted.Eagerly, ExportSettings())
@@ -435,17 +449,21 @@ class CameraViewModel @Inject constructor(
             )}
 
             try {
-                // Load all segment images for alignment preview
-                val bitmaps = segments.mapNotNull { segment ->
-                    imageRepository.loadBitmap(segment.imagePath)
+                // Load each segment's full-res bitmap for stitching, keeping its display path
+                // index-aligned (drop any segment whose bitmap fails to decode so counts match).
+                val loaded = segments.mapNotNull { segment ->
+                    imageRepository.loadBitmap(segment.imagePath)?.let { bmp ->
+                        bmp to (segment.thumbnailPath ?: segment.imagePath)
+                    }
                 }
 
-                if (bitmaps.isEmpty()) {
+                if (loaded.isEmpty()) {
                     throw Exception("Failed to load segment images")
                 }
 
-                // Store bitmaps for alignment screen
-                _alignmentBitmaps.value = bitmaps
+                // Bitmaps stay internal for stitching; paths drive the UI.
+                alignmentBitmaps = loaded.map { it.first }
+                _alignmentPaths.value = loaded.map { it.second }
 
                 _uiState.update { it.copy(
                     isProcessing = false,
@@ -508,7 +526,7 @@ class CameraViewModel @Inject constructor(
         _simpleFieldId.value = fieldId
         _simpleTreatment.value = treatment
         _simpleLeafNumber.value = leafNumber.coerceAtLeast(1)
-        _pendingCapture.value = null
+        clearPendingReview()
         _simpleMode.value = true
         _uiState.update { it.copy(message = "Simple mode — set details, then capture") }
     }
@@ -521,10 +539,32 @@ class CameraViewModel @Inject constructor(
     /** Holds a freshly captured image for Retake/Export review. */
     fun onSimpleCaptured(image: CapturedImage) {
         _pendingCapture.value = image
+        viewModelScope.launch {
+            // Resolve a file path for the review overlay: the on-disk capture if we have one,
+            // otherwise a temp preview written from the in-memory bitmap.
+            pendingTempPreview?.delete()
+            pendingTempPreview = null
+            val path = when {
+                image.filePath != null -> image.filePath
+                image.bitmap != null -> imageRepository.saveReviewPreview(image.bitmap)
+                    .also { pendingTempPreview = java.io.File(it) }
+                else -> null
+            }
+            _pendingReviewPath.value = path
+        }
     }
 
     /** Discards the pending capture and returns to the live camera. */
     fun retakeSimple() {
+        clearPendingReview()
+    }
+
+    /** Releases the pending capture's bitmap + temp preview and resets review state. */
+    private fun clearPendingReview() {
+        pendingTempPreview?.delete()
+        pendingTempPreview = null
+        _pendingReviewPath.value = null
+        // Safe to recycle: the overlay renders the file path above, never this bitmap.
         _pendingCapture.value?.bitmap?.let { if (!it.isRecycled) it.recycle() }
         _pendingCapture.value = null
     }
@@ -595,9 +635,8 @@ class CameraViewModel @Inject constructor(
                     simpleFileName(farmerId, fieldId, treatment, leaf, settings.format.extension)
                 )
 
-                // 4. Clear pending, ready for next leaf
-                image.bitmap?.let { if (!it.isRecycled) it.recycle() }
-                _pendingCapture.value = null
+                // 4. Clear pending (recycles the bitmap + deletes the temp preview), ready for next leaf
+                clearPendingReview()
 
                 _uiState.update { it.copy(
                     isProcessing = false,
@@ -688,7 +727,7 @@ class CameraViewModel @Inject constructor(
      * Called from alignment screen when user taps "Auto Align".
      */
     suspend fun getAutoAlignOffsets(): List<Int> {
-        val bitmaps = _alignmentBitmaps.value
+        val bitmaps = alignmentBitmaps
         if (bitmaps.isEmpty()) return emptyList()
 
         val searchTolerance = midribSearchTolerance.value / 100f
@@ -700,7 +739,7 @@ class CameraViewModel @Inject constructor(
      * Called from alignment screen for live preview updates.
      */
     suspend fun generatePreview(offsets: List<Int>): Bitmap? {
-        val bitmaps = _alignmentBitmaps.value
+        val bitmaps = alignmentBitmaps
         if (bitmaps.isEmpty()) return null
 
         val overlapPercent = overlapPercentage.value / 100f
@@ -719,7 +758,7 @@ class CameraViewModel @Inject constructor(
     fun confirmAlignment(offsets: List<Int>) {
         viewModelScope.launch {
             val session = currentSession ?: return@launch
-            val bitmaps = _alignmentBitmaps.value
+            val bitmaps = alignmentBitmaps
 
             if (bitmaps.isEmpty()) {
                 _uiState.update { it.copy(error = "No images to stitch") }
@@ -804,19 +843,23 @@ class CameraViewModel @Inject constructor(
      * Clears and recycles alignment bitmaps to free memory.
      */
     private fun clearAlignmentBitmaps() {
-        _alignmentBitmaps.value.forEach { bitmap ->
+        alignmentBitmaps.forEach { bitmap ->
             if (!bitmap.isRecycled) {
                 bitmap.recycle()
             }
         }
-        _alignmentBitmaps.value = emptyList()
+        alignmentBitmaps = emptyList()
+        _alignmentPaths.value = emptyList()
     }
 
     fun cancelSession() {
         viewModelScope.launch {
             currentSession?.let { session ->
-                sessionRepository.deleteSession(session.id)
+                // Files first, then the row: if this is interrupted, the row still points at
+                // the (now-gone) files and the gallery falls back gracefully. The reverse order
+                // would orphan the files forever — the deleted row was their only record.
                 imageRepository.deleteSessionImages(session.id)
+                sessionRepository.deleteSession(session.id)
             }
 
             currentSession = null

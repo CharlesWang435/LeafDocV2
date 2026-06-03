@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -59,7 +60,7 @@ fun ResultsScreen(
 
     // Alignment editing state
     val showAlignmentScreen by viewModel.showAlignmentScreen.collectAsState()
-    val alignmentBitmaps by viewModel.alignmentBitmaps.collectAsState()
+    val alignmentPaths by viewModel.alignmentPaths.collectAsState()
     val overlapPercentage by viewModel.overlapPercentage.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
@@ -288,9 +289,9 @@ fun ResultsScreen(
     }
 
     // Manual Alignment Screen
-    if (showAlignmentScreen && alignmentBitmaps.isNotEmpty()) {
+    if (showAlignmentScreen && alignmentPaths.isNotEmpty()) {
         ManualAlignmentScreen(
-            segments = alignmentBitmaps,
+            segmentPaths = alignmentPaths,
             overlapPercent = overlapPercentage / 100f,
             onAutoAlign = { viewModel.getAutoAlignOffsets() },
             onGeneratePreview = { offsets -> viewModel.generatePreview(offsets) },
@@ -742,8 +743,7 @@ private fun IndividualFramesCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                items(segments) { segment ->
-                    val index = segments.indexOf(segment)
+                itemsIndexed(segments, key = { _, segment -> segment.id }) { index, segment ->
                     Column(
                         modifier = Modifier.width(120.dp),
                         horizontalAlignment = Alignment.CenterHorizontally

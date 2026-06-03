@@ -53,6 +53,7 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.leafdoc.app.camera.CameraCapabilities
 import com.leafdoc.app.camera.CapturedImage
 import com.leafdoc.app.camera.CameraState
+import com.leafdoc.app.camera.CaptureInProgressException
 import com.leafdoc.app.camera.LensInfo
 import com.leafdoc.app.camera.ProCameraController
 import com.leafdoc.app.data.model.*
@@ -93,11 +94,12 @@ fun CameraScreen(
 
     // Manual alignment state
     val showManualAlignment by viewModel.showManualAlignment.collectAsState()
-    val alignmentBitmaps by viewModel.alignmentBitmaps.collectAsState()
+    val alignmentPaths by viewModel.alignmentPaths.collectAsState()
 
     // Simple (fast field) mode state
     val simpleMode by viewModel.simpleMode.collectAsState()
     val pendingCapture by viewModel.pendingCapture.collectAsState()
+    val pendingReviewPath by viewModel.pendingReviewPath.collectAsState()
     val simpleFarmerId by viewModel.simpleFarmerId.collectAsState()
     val simpleFieldId by viewModel.simpleFieldId.collectAsState()
     val simpleTreatment by viewModel.simpleTreatment.collectAsState()
@@ -334,14 +336,20 @@ fun CameraScreen(
                 onGalleryClick = onNavigateToGallery,
                 onStartSession = { showSessionDialog = true },
                 onCapture = {
-                    scope.launch {
-                        try {
-                            cameraController?.captureImage()?.let { image ->
-                                if (simpleMode) viewModel.onSimpleCaptured(image)
-                                else viewModel.onImageCaptured(image)
+                    // Ignore taps while a capture is already running — overlapping captures
+                    // collide on the camera device and black out the preview.
+                    if (cameraState != CameraState.Capturing) {
+                        scope.launch {
+                            try {
+                                cameraController?.captureImage()?.let { image ->
+                                    if (simpleMode) viewModel.onSimpleCaptured(image)
+                                    else viewModel.onImageCaptured(image)
+                                }
+                            } catch (e: CaptureInProgressException) {
+                                // Debounce race — a capture was already in flight. Silently ignore.
+                            } catch (e: Exception) {
+                                viewModel.reportCaptureError(e.message ?: "Capture failed")
                             }
-                        } catch (e: Exception) {
-                            viewModel.reportCaptureError(e.message ?: "Capture failed")
                         }
                     }
                 },
@@ -459,7 +467,7 @@ fun CameraScreen(
             // Simple-mode capture review (Retake / Export)
             if (simpleMode && pendingCapture != null) {
                 SimpleReviewOverlay(
-                    image = pendingCapture!!,
+                    reviewPath = pendingReviewPath,
                     leafNumber = simpleLeafNumber,
                     isProcessing = uiState.isProcessing,
                     onRetake = { viewModel.retakeSimple() },
@@ -497,9 +505,9 @@ fun CameraScreen(
     }
 
     // Manual Alignment Screen
-    if (showManualAlignment && alignmentBitmaps.isNotEmpty()) {
+    if (showManualAlignment && alignmentPaths.isNotEmpty()) {
         ManualAlignmentScreen(
-            segments = alignmentBitmaps,
+            segmentPaths = alignmentPaths,
             overlapPercent = overlapPercentage / 100f,
             onAutoAlign = { viewModel.getAutoAlignOffsets() },
             onGeneratePreview = { offsets -> viewModel.generatePreview(offsets) },
@@ -930,7 +938,7 @@ private fun SimpleMetadataBar(
 
 @Composable
 private fun SimpleReviewOverlay(
-    image: CapturedImage,
+    reviewPath: String?,
     leafNumber: Int,
     isProcessing: Boolean,
     onRetake: () -> Unit,
@@ -941,17 +949,11 @@ private fun SimpleReviewOverlay(
         modifier = modifier.background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        val bmp = image.bitmap
-        if (bmp != null && !bmp.isRecycled) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = "Captured leaf",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-        } else if (image.filePath != null) {
+        // Render the on-disk capture/preview via Coil — never a ViewModel-owned bitmap, so the
+        // VM can recycle the live capture on retake/export without crashing composition.
+        if (reviewPath != null) {
             AsyncImage(
-                model = image.filePath,
+                model = reviewPath,
                 contentDescription = "Captured leaf",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit
