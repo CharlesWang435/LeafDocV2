@@ -29,6 +29,14 @@ class SettingsViewModel @Inject constructor(
     val fieldId = preferencesManager.fieldId
         .stateIn(viewModelScope, SharingStarted.Lazily, "")
 
+    // User-managed pick lists
+    val farmerIdOptions = preferencesManager.farmerIdOptions
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val fieldIdOptions = preferencesManager.fieldIdOptions
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val treatmentOptions = preferencesManager.treatmentOptions
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
     val overlapPercentage = preferencesManager.overlapGuidePercentage
         .stateIn(viewModelScope, SharingStarted.Lazily, 10)
 
@@ -175,6 +183,14 @@ class SettingsViewModel @Inject constructor(
             preferencesManager.updateFieldId(id)
         }
     }
+
+    // Pick-list management
+    fun addFarmerIdOption(value: String) = viewModelScope.launch { preferencesManager.addFarmerIdOption(value) }
+    fun removeFarmerIdOption(value: String) = viewModelScope.launch { preferencesManager.removeFarmerIdOption(value) }
+    fun addFieldIdOption(value: String) = viewModelScope.launch { preferencesManager.addFieldIdOption(value) }
+    fun removeFieldIdOption(value: String) = viewModelScope.launch { preferencesManager.removeFieldIdOption(value) }
+    fun addTreatmentOption(value: String) = viewModelScope.launch { preferencesManager.addTreatmentOption(value) }
+    fun removeTreatmentOption(value: String) = viewModelScope.launch { preferencesManager.removeTreatmentOption(value) }
 
     // App Settings
     fun updateOverlapPercentage(percentage: Int) {

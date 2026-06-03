@@ -359,6 +359,9 @@ class ImageRepository @Inject constructor(
         if (session.fieldId.isNotEmpty()) {
             parts.add(session.fieldId.take(20))
         }
+        if (session.treatment.isNotEmpty()) {
+            parts.add(session.treatment.take(20))
+        }
         parts.add("Leaf${session.leafNumber}")
 
         // Add frame label if present

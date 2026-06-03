@@ -33,6 +33,7 @@ class LeafSessionRepository @Inject constructor(
     suspend fun createSession(
         farmerId: String = "",
         fieldId: String = "",
+        treatment: String = "",
         leafNumber: Int = 1,
         latitude: Double? = null,
         longitude: Double? = null,
@@ -42,6 +43,7 @@ class LeafSessionRepository @Inject constructor(
         val session = LeafSession(
             farmerId = farmerId,
             fieldId = fieldId,
+            treatment = treatment,
             leafNumber = leafNumber,
             latitude = latitude,
             longitude = longitude,
