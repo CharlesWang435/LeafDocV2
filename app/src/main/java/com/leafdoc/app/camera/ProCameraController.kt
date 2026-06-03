@@ -27,6 +27,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.leafdoc.app.data.model.CameraSettings
 import com.leafdoc.app.data.model.CaptureFormat
 import com.leafdoc.app.data.model.FlashMode
+import com.leafdoc.app.data.model.FocusMode
 import com.leafdoc.app.data.model.ResolutionMode
 import com.leafdoc.app.data.model.WhiteBalanceMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,6 +77,20 @@ class ProCameraController(
     val rawEnabled: StateFlow<Boolean> = _rawEnabled.asStateFlow()
 
     fun setRawEnabled(enabled: Boolean) { _rawEnabled.value = enabled }
+
+    // AF lock: when on, tap-to-focus holds focus (no auto-cancel) so it stays put between shots.
+    private val _afLocked = MutableStateFlow(false)
+    val afLocked: StateFlow<Boolean> = _afLocked.asStateFlow()
+
+    fun setAfLocked(locked: Boolean) {
+        _afLocked.value = locked
+        // Releasing the lock resumes the active AF mode.
+        if (!locked) camera?.cameraControl?.cancelFocusAndMetering()
+    }
+
+    fun updateFocusMode(mode: FocusMode) {
+        applySettings(_currentSettings.value.copy(focusMode = mode))
+    }
 
     // Optical zoom ratio = lens selection on a logical multi-camera (0.6x ultra-wide → 10x tele).
     private val _zoomRatio = MutableStateFlow(1f)
@@ -517,21 +532,34 @@ class ProCameraController(
             )
         }
 
-        // Focus distance
-        if (settings.focusDistance != CameraSettings.FOCUS_AUTO) {
-            optionsBuilder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_OFF
+        // Focus mode
+        when (settings.focusMode) {
+            FocusMode.CONTINUOUS -> optionsBuilder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
             )
-            optionsBuilder.setCaptureRequestOption(
-                CaptureRequest.LENS_FOCUS_DISTANCE,
-                settings.focusDistance
+            FocusMode.SINGLE -> optionsBuilder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO
             )
-        } else {
-            optionsBuilder.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            FocusMode.MACRO -> optionsBuilder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_MACRO
             )
+            FocusMode.INFINITY -> {
+                optionsBuilder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                optionsBuilder.setCaptureRequestOption(
+                    CaptureRequest.LENS_FOCUS_DISTANCE, 0f // 0 diopters = focus at infinity
+                )
+            }
+            FocusMode.MANUAL -> {
+                optionsBuilder.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF
+                )
+                val distance = if (settings.focusDistance >= 0f) settings.focusDistance else 0f
+                optionsBuilder.setCaptureRequestOption(
+                    CaptureRequest.LENS_FOCUS_DISTANCE, distance
+                )
+            }
         }
 
         // White balance
@@ -637,7 +665,11 @@ class ProCameraController(
         val factory = previewView.meteringPointFactory
         val point = factory.createPoint(x, y)
         val action = FocusMeteringAction.Builder(point)
-            .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
+            .apply {
+                // When AF is locked, hold focus indefinitely (no auto-cancel).
+                if (_afLocked.value) disableAutoCancel()
+                else setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
+            }
             .build()
 
         camera.cameraControl.startFocusAndMetering(action)

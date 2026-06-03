@@ -867,7 +867,11 @@ class CameraViewModel @Inject constructor(
     }
 
     fun updateFocusDistance(distance: Float) {
-        updateCameraSettings(_cameraSettings.value.copy(focusDistance = distance))
+        updateCameraSettings(_cameraSettings.value.copy(focusDistance = distance, focusMode = FocusMode.MANUAL))
+    }
+
+    fun updateFocusMode(mode: FocusMode) {
+        updateCameraSettings(_cameraSettings.value.copy(focusMode = mode))
     }
 
     fun updateWhiteBalance(mode: WhiteBalanceMode) {
