@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.os.Build
 import android.util.Range
 import android.util.Size
 import android.view.Surface
@@ -20,6 +21,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.leafdoc.app.data.model.CameraSettings
@@ -68,6 +70,27 @@ class ProCameraController(
     // User-selected still-capture resolution for the current lens; null = auto (largest available).
     private val _selectedResolution = MutableStateFlow<Size?>(null)
     val selectedResolution: StateFlow<Size?> = _selectedResolution.asStateFlow()
+
+    // When true, captures shoot uncompressed RAW/DNG (+ a companion JPEG) on RAW-capable lenses.
+    private val _rawEnabled = MutableStateFlow(false)
+    val rawEnabled: StateFlow<Boolean> = _rawEnabled.asStateFlow()
+
+    fun setRawEnabled(enabled: Boolean) { _rawEnabled.value = enabled }
+
+    // Optical zoom ratio = lens selection on a logical multi-camera (0.6x ultra-wide → 10x tele).
+    private val _zoomRatio = MutableStateFlow(1f)
+    val zoomRatio: StateFlow<Float> = _zoomRatio.asStateFlow()
+
+    private val _zoomRange = MutableStateFlow(1f to 1f)
+    val zoomRange: StateFlow<Pair<Float, Float>> = _zoomRange.asStateFlow()
+
+    /** Sets the optical/digital zoom ratio (clamped to the camera's supported range). */
+    fun setZoom(ratio: Float) {
+        val (min, max) = _zoomRange.value
+        val clamped = ratio.coerceIn(min, max)
+        camera?.cameraControl?.setZoomRatio(clamped)
+        _zoomRatio.value = clamped
+    }
 
     private var frameAnalyzer: FrameAnalyzer? = null
     private var lifecycleOwner: LifecycleOwner? = null
@@ -191,11 +214,34 @@ class ProCameraController(
         val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
             ?: CameraCharacteristics.LENS_FACING_BACK
 
-        // Available still (JPEG) sizes for THIS lens, largest first.
-        val stillSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        // Available standard (binned) JPEG sizes for THIS lens.
+        val standardSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?.getOutputSizes(ImageFormat.JPEG)
-            ?.sortedByDescending { it.width.toLong() * it.height }
+            ?.toList()
             ?: emptyList()
+
+        // Full-sensor maximum-resolution JPEG sizes (e.g. 50MP/200MP). Gated on the max-res
+        // stream map EXISTING — NOT on the ULTRA_HIGH_RESOLUTION_SENSOR capability flag, which
+        // Samsung leaves unset even though the framework max-res path works. API 31+ only.
+        val maxResSizes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP_MAXIMUM_RESOLUTION)
+                ?.getOutputSizes(ImageFormat.JPEG)
+                ?.filter { mr -> standardSizes.none { it.width == mr.width && it.height == mr.height } }
+                ?: emptyList()
+        } else emptyList()
+
+        // RAW capability for this lens (uncompressed sensor capture via DngCreator).
+        val caps = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: IntArray(0)
+        val rawSize = if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
+            characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?.getOutputSizes(ImageFormat.RAW_SENSOR)
+                ?.maxByOrNull { it.width.toLong() * it.height }
+        } else null
+
+        // Picker shows max-res sizes + standard sizes, largest first.
+        val allSizes = (maxResSizes + standardSizes)
+            .distinctBy { it.width to it.height }
+            .sortedByDescending { it.width.toLong() * it.height }
 
         return LensInfo(
             id = cameraId,
@@ -205,7 +251,9 @@ class ProCameraController(
             physicalSize = sensorSize,
             zoomRatio = zoomRatio,
             displayName = displayName,
-            stillSizes = stillSizes
+            stillSizes = allSizes,
+            maxResSizes = maxResSizes,
+            rawSize = rawSize
         )
     }
 
@@ -384,6 +432,26 @@ class ProCameraController(
         )
 
         preview?.setSurfaceProvider(previewView.surfaceProvider)
+
+        // Read the optical zoom range of this (logical) camera. On modern phones the
+        // ultra-wide / main / telephoto lenses are fused behind one logical camera and are
+        // selected by zoom ratio (e.g. 0.6x–10x), not by switching camera IDs.
+        camera?.let { cam ->
+            // Authoritative range from Camera2 (CameraX zoomState.value can be null right after bind).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    Camera2CameraInfo.from(cam.cameraInfo)
+                        .getCameraCharacteristic(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        ?.let { _zoomRange.value = it.lower to it.upper }
+                } catch (_: Exception) {}
+            }
+            cam.cameraInfo.zoomState.value?.let { zs ->
+                if (_zoomRange.value.second <= _zoomRange.value.first) {
+                    _zoomRange.value = zs.minZoomRatio to zs.maxZoomRatio
+                }
+                _zoomRatio.value = zs.zoomRatio
+            }
+        }
     }
 
     /**
@@ -575,7 +643,118 @@ class ProCameraController(
         camera.cameraControl.startFocusAndMetering(action)
     }
 
-    suspend fun captureImage(): CapturedImage = suspendCancellableCoroutine { continuation ->
+    /**
+     * Captures a still image. Routes to the Camera2 maximum-resolution engine when the user
+     * has selected a full-sensor size (50/200MP); otherwise uses the standard CameraX path.
+     */
+    suspend fun captureImage(): CapturedImage {
+        val lens = _currentLens.value
+        val size = _selectedResolution.value
+        val isMaxRes = size != null && lens != null &&
+            lens.maxResSizes.any { it.width == size.width && it.height == size.height }
+
+        return when {
+            _rawEnabled.value && lens?.rawSize != null -> captureRaw(lens, lens.rawSize)
+            isMaxRes && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> captureHighRes(lens!!, size!!)
+            else -> captureWithCameraX()
+        }
+    }
+
+    /**
+     * Uncompressed RAW/DNG capture via Camera2 (plus a companion JPEG for in-app display).
+     * Same unbind → capture → re-bind handoff as the high-res path.
+     */
+    private suspend fun captureRaw(lens: LensInfo, rawSize: Size): CapturedImage {
+        _cameraState.value = CameraState.Capturing
+        val settings = _currentSettings.value
+        try {
+            cameraProvider?.unbindAll()
+
+            // Companion JPEG at the lens's largest standard size.
+            val jpegSize = lens.stillSizes.firstOrNull { it !in lens.maxResSizes } ?: rawSize
+            val engine = HighResCaptureEngine(context)
+            val result = try {
+                engine.captureRaw(lens.id, rawSize, jpegSize, settings)
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "RAW capture failed, retrying once")
+                kotlinx.coroutines.delay(500)
+                engine.captureRaw(lens.id, rawSize, jpegSize, settings)
+            }
+
+            return CapturedImage(
+                bitmap = null,
+                filePath = result.jpegPath,     // companion JPEG = in-app working image
+                dngFilePath = result.dngPath,   // uncompressed master
+                width = jpegSize.width,
+                height = jpegSize.height,
+                timestamp = System.currentTimeMillis(),
+                iso = if (settings.iso != CameraSettings.ISO_AUTO) settings.iso else null,
+                shutterSpeed = if (settings.shutterSpeed != CameraSettings.SHUTTER_AUTO) settings.shutterSpeed else null,
+                focusDistance = if (settings.focusDistance != CameraSettings.FOCUS_AUTO) settings.focusDistance else null,
+                whiteBalance = settings.whiteBalance,
+                exposureCompensation = settings.exposureCompensation,
+                captureFormat = settings.captureFormat
+            )
+        } finally {
+            val owner = lifecycleOwner
+            val view = previewView
+            if (owner != null && view != null) {
+                buildUseCases(settings)
+                bindCamera(owner, view, lens.id)
+                applySettings(settings)
+            }
+            _cameraState.value = CameraState.Ready
+        }
+    }
+
+    /**
+     * Full-sensor capture via Camera2: unbind CameraX (release the device), shoot with
+     * SENSOR_PIXEL_MODE = MAXIMUM_RESOLUTION, write JPEG straight to disk, then re-bind CameraX.
+     */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private suspend fun captureHighRes(lens: LensInfo, size: Size): CapturedImage {
+        _cameraState.value = CameraState.Capturing
+        val settings = _currentSettings.value
+        try {
+            cameraProvider?.unbindAll() // release the device for Camera2
+
+            val engine = HighResCaptureEngine(context)
+            // Retry once: CameraX may not have fully released the device yet (ERROR_CAMERA_IN_USE).
+            val result = try {
+                engine.capture(lens.id, size, settings)
+            } catch (e: Exception) {
+                timber.log.Timber.w(e, "High-res capture failed, retrying once")
+                kotlinx.coroutines.delay(500)
+                engine.capture(lens.id, size, settings)
+            }
+
+            return CapturedImage(
+                bitmap = null,
+                filePath = result.filePath,
+                width = result.width,
+                height = result.height,
+                timestamp = System.currentTimeMillis(),
+                iso = if (settings.iso != CameraSettings.ISO_AUTO) settings.iso else null,
+                shutterSpeed = if (settings.shutterSpeed != CameraSettings.SHUTTER_AUTO) settings.shutterSpeed else null,
+                focusDistance = if (settings.focusDistance != CameraSettings.FOCUS_AUTO) settings.focusDistance else null,
+                whiteBalance = settings.whiteBalance,
+                exposureCompensation = settings.exposureCompensation,
+                captureFormat = settings.captureFormat
+            )
+        } finally {
+            // Re-bind CameraX preview for the next shot.
+            val owner = lifecycleOwner
+            val view = previewView
+            if (owner != null && view != null) {
+                buildUseCases(settings)
+                bindCamera(owner, view, lens.id)
+                applySettings(settings)
+            }
+            _cameraState.value = CameraState.Ready
+        }
+    }
+
+    private suspend fun captureWithCameraX(): CapturedImage = suspendCancellableCoroutine { continuation ->
         val imageCapture = this.imageCapture ?: run {
             continuation.resumeWithException(Exception("ImageCapture not initialized"))
             return@suspendCancellableCoroutine
@@ -678,7 +857,11 @@ data class LensInfo(
     val physicalSize: android.util.SizeF?,
     val zoomRatio: Float,
     val displayName: String,
-    val stillSizes: List<Size> = emptyList()
+    val stillSizes: List<Size> = emptyList(),
+    /** Sizes that require the Camera2 maximum-resolution path (full-sensor 50/200MP). */
+    val maxResSizes: List<Size> = emptyList(),
+    /** Largest RAW_SENSOR size if this lens supports RAW/DNG capture, else null. */
+    val rawSize: Size? = null
 )
 
 enum class LensType {
@@ -691,7 +874,12 @@ enum class LensType {
 }
 
 data class CapturedImage(
-    val bitmap: Bitmap,
+    // Standard (CameraX) captures carry a decoded bitmap; high-res captures carry only a
+    // file path (the JPEG is written straight to disk to avoid a huge bitmap allocation).
+    val bitmap: Bitmap?,
+    val filePath: String? = null,
+    /** Path to a companion RAW/DNG master, when captured in RAW mode. */
+    val dngFilePath: String? = null,
     val width: Int,
     val height: Int,
     val timestamp: Long,
