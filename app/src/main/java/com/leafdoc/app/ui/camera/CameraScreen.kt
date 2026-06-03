@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -102,6 +103,10 @@ fun CameraScreen(
     // Pop-out panel state
     var showLockControlsPanel by remember { mutableStateOf(false) }
 
+    // Focus UI state
+    var showFocusPanel by remember { mutableStateOf(false) }
+    var focusTapPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+
     var cameraController by remember { mutableStateOf<ProCameraController?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     var previewWidth by remember { mutableStateOf(0) }
@@ -116,6 +121,7 @@ fun CameraScreen(
     val currentLens by cameraController?.currentLens?.collectAsState() ?: remember { mutableStateOf(null) }
     val selectedResolution by cameraController?.selectedResolution?.collectAsState() ?: remember { mutableStateOf<android.util.Size?>(null) }
     val rawEnabled by cameraController?.rawEnabled?.collectAsState() ?: remember { mutableStateOf(false) }
+    val afLocked by cameraController?.afLocked?.collectAsState() ?: remember { mutableStateOf(false) }
     val zoomRatio by cameraController?.zoomRatio?.collectAsState() ?: remember { mutableStateOf(1f) }
     val zoomRange by cameraController?.zoomRange?.collectAsState() ?: remember { mutableStateOf(1f to 1f) }
 
@@ -183,6 +189,7 @@ fun CameraScreen(
                             onTap = { offset ->
                                 previewView?.let { view ->
                                     cameraController?.focusOnPoint(offset.x, offset.y, view)
+                                    focusTapPoint = offset
                                 }
                             },
                             onDoubleTap = {
@@ -238,6 +245,8 @@ fun CameraScreen(
                 rawSupported = currentLens?.rawSize != null,
                 rawEnabled = rawEnabled,
                 onToggleRaw = { cameraController?.setRawEnabled(!rawEnabled) },
+                focusActive = showFocusPanel || cameraSettings.focusMode != FocusMode.CONTINUOUS || afLocked,
+                onToggleFocus = { showFocusPanel = !showFocusPanel },
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
                 onGalleryClick = onNavigateToGallery,
@@ -358,6 +367,43 @@ fun CameraScreen(
                 )
             }
 
+            // Tap-to-focus ring
+            focusTapPoint?.let { pt ->
+                val ringHalfPx = with(androidx.compose.ui.platform.LocalDensity.current) { 36.dp.toPx() }
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            androidx.compose.ui.unit.IntOffset(
+                                (pt.x - ringHalfPx).toInt(),
+                                (pt.y - ringHalfPx).toInt()
+                            )
+                        }
+                        .size(72.dp)
+                        .border(2.dp, Color.Yellow, CircleShape)
+                )
+                LaunchedEffect(pt) {
+                    kotlinx.coroutines.delay(800)
+                    focusTapPoint = null
+                }
+            }
+
+            // Focus options panel
+            if (showFocusPanel) {
+                FocusPanel(
+                    focusMode = cameraSettings.focusMode,
+                    focusDistance = cameraSettings.focusDistance,
+                    maxFocusDistance = cameraCapabilities?.minFocusDistance ?: 0f,
+                    afLocked = afLocked,
+                    onFocusModeChange = { viewModel.updateFocusMode(it) },
+                    onFocusDistanceChange = { viewModel.updateFocusDistance(it) },
+                    onAfLockToggle = { cameraController?.setAfLocked(!afLocked) },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 150.dp, start = 12.dp, end = 12.dp)
+                )
+            }
+
             // Status Message
             uiState.message?.let { message ->
                 StatusMessage(
@@ -459,6 +505,8 @@ private fun TopBar(
     rawSupported: Boolean,
     rawEnabled: Boolean,
     onToggleRaw: () -> Unit,
+    focusActive: Boolean,
+    onToggleFocus: () -> Unit,
     showLockControlsPanel: Boolean,
     onToggleLockControlsPanel: () -> Unit,
     cropRectEnabled: Boolean,
@@ -585,6 +633,24 @@ private fun TopBar(
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+
+        // Focus options toggle
+        IconButton(
+            onClick = onToggleFocus,
+            modifier = Modifier
+                .size(40.dp)
+                .background(
+                    if (focusActive) Color.Cyan.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
+                    CircleShape
+                )
+        ) {
+            Icon(
+                imageVector = Icons.Default.CenterFocusStrong,
+                contentDescription = "Focus options",
+                tint = if (focusActive) Color.Black else Color.White,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         IconButton(
@@ -884,6 +950,73 @@ private fun SimpleReviewOverlay(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Export")
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusPanel(
+    focusMode: FocusMode,
+    focusDistance: Float,
+    maxFocusDistance: Float,
+    afLocked: Boolean,
+    onFocusModeChange: (FocusMode) -> Unit,
+    onFocusDistanceChange: (Float) -> Unit,
+    onAfLockToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.Black.copy(alpha = 0.8f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Focus", color = Color.White, fontWeight = FontWeight.Bold)
+                FilterChip(
+                    selected = afLocked,
+                    onClick = onAfLockToggle,
+                    label = { Text("AF Lock") },
+                    leadingIcon = {
+                        Icon(
+                            if (afLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+            }
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FocusMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = focusMode == mode,
+                        onClick = { onFocusModeChange(mode) },
+                        label = { Text(mode.displayName) }
+                    )
+                }
+            }
+            if (focusMode == FocusMode.MANUAL && maxFocusDistance > 0f) {
+                Text(
+                    "Far  ←  focus distance  →  Near",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 11.sp
+                )
+                Slider(
+                    value = (if (focusDistance >= 0f) focusDistance else 0f).coerceIn(0f, maxFocusDistance),
+                    onValueChange = onFocusDistanceChange,
+                    valueRange = 0f..maxFocusDistance
+                )
             }
         }
     }

@@ -6,6 +6,7 @@ package com.leafdoc.app.data.model
 data class CameraSettings(
     val iso: Int = ISO_AUTO,
     val shutterSpeed: Long = SHUTTER_AUTO,  // in nanoseconds
+    val focusMode: FocusMode = FocusMode.CONTINUOUS,
     val focusDistance: Float = FOCUS_AUTO,
     val whiteBalance: WhiteBalanceMode = WhiteBalanceMode.AUTO,
     val exposureCompensation: Float = 0f,
@@ -76,6 +77,14 @@ enum class ResolutionMode(val displayName: String, val megapixels: Float?) {
     HIGH("High (12MP)", 12f),
     MEDIUM("Medium (8MP)", 8f),
     LOW("Low (4MP)", 4f)
+}
+
+enum class FocusMode(val displayName: String) {
+    CONTINUOUS("Auto"),   // continuous autofocus
+    SINGLE("Tap"),        // one-shot AF, driven by tap-to-focus
+    MACRO("Macro"),       // close-up autofocus
+    INFINITY("∞"),        // fixed focus at infinity
+    MANUAL("Manual")      // fixed focus at a user-chosen distance (slider)
 }
 
 enum class FlashMode(val displayName: String) {

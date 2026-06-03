@@ -16,6 +16,7 @@ class UserPreferencesManager(private val context: Context) {
     private object PreferencesKeys {
         val ISO = intPreferencesKey("camera_iso")
         val SHUTTER_SPEED = longPreferencesKey("camera_shutter_speed")
+        val FOCUS_MODE = stringPreferencesKey("camera_focus_mode")
         val FOCUS_DISTANCE = floatPreferencesKey("camera_focus_distance")
         val WHITE_BALANCE = stringPreferencesKey("camera_white_balance")
         val EXPOSURE_COMPENSATION = floatPreferencesKey("camera_exposure_compensation")
@@ -69,6 +70,9 @@ class UserPreferencesManager(private val context: Context) {
         CameraSettings(
             iso = preferences[PreferencesKeys.ISO] ?: CameraSettings.ISO_AUTO,
             shutterSpeed = preferences[PreferencesKeys.SHUTTER_SPEED] ?: CameraSettings.SHUTTER_AUTO,
+            focusMode = preferences[PreferencesKeys.FOCUS_MODE]?.let {
+                try { FocusMode.valueOf(it) } catch (e: IllegalArgumentException) { FocusMode.CONTINUOUS }
+            } ?: FocusMode.CONTINUOUS,
             focusDistance = preferences[PreferencesKeys.FOCUS_DISTANCE] ?: CameraSettings.FOCUS_AUTO,
             whiteBalance = preferences[PreferencesKeys.WHITE_BALANCE]?.let {
                 WhiteBalanceMode.valueOf(it)
@@ -202,6 +206,7 @@ class UserPreferencesManager(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.ISO] = settings.iso
             preferences[PreferencesKeys.SHUTTER_SPEED] = settings.shutterSpeed
+            preferences[PreferencesKeys.FOCUS_MODE] = settings.focusMode.name
             preferences[PreferencesKeys.FOCUS_DISTANCE] = settings.focusDistance
             preferences[PreferencesKeys.WHITE_BALANCE] = settings.whiteBalance.name
             preferences[PreferencesKeys.EXPOSURE_COMPENSATION] = settings.exposureCompensation
