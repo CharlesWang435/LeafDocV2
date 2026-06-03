@@ -16,6 +16,8 @@ interface AiProvider {
      * @param promptText The complete prompt text (built from template + context)
      * @param latitude Optional GPS latitude for location-based disease context
      * @param longitude Optional GPS longitude for location-based disease context
+     * @param temperature Sampling temperature from the selected prompt template
+     * @param maxTokens Max output tokens from the selected prompt template (research mode needs more)
      * @return Result containing DiagnosisDisplay on success or exception on failure
      */
     suspend fun analyzeLeafImage(
@@ -23,7 +25,9 @@ interface AiProvider {
         bitmap: Bitmap,
         promptText: String,
         latitude: Double? = null,
-        longitude: Double? = null
+        longitude: Double? = null,
+        temperature: Float = 0.2f,
+        maxTokens: Int = 2048
     ): Result<DiagnosisDisplay>
 
     /**

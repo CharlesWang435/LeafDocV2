@@ -2,10 +2,10 @@ package com.leafdoc.app.di
 
 import android.content.Context
 import com.google.gson.Gson
+import com.leafdoc.app.data.local.LeafDocDatabase
 import com.leafdoc.app.data.local.LeafSegmentDao
 import com.leafdoc.app.data.local.LeafSessionDao
 import com.leafdoc.app.data.preferences.UserPreferencesManager
-import com.leafdoc.app.data.remote.GeminiAiService
 import com.leafdoc.app.data.repository.DiagnosisRepository
 import com.leafdoc.app.data.repository.LeafSessionRepository
 import com.leafdoc.app.data.repository.ImageRepository
@@ -30,10 +30,11 @@ object AppModule {
     @Provides
     @Singleton
     fun provideLeafSessionRepository(
+        database: LeafDocDatabase,
         sessionDao: LeafSessionDao,
         segmentDao: LeafSegmentDao
     ): LeafSessionRepository {
-        return LeafSessionRepository(sessionDao, segmentDao)
+        return LeafSessionRepository(database, sessionDao, segmentDao)
     }
 
     @Provides

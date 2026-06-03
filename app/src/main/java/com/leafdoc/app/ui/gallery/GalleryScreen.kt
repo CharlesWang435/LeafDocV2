@@ -161,8 +161,7 @@ fun GalleryScreen(
                         },
                         onLongClick = {
                             viewModel.toggleSessionSelection(session.id)
-                        },
-                        onNavigateToResults = onNavigateToSession
+                        }
                     )
                 }
             }
@@ -221,8 +220,7 @@ private fun SessionCard(
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onNavigateToResults: (String) -> Unit
+    onLongClick: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
 
@@ -250,25 +248,12 @@ private fun SessionCard(
         Box(modifier = Modifier.fillMaxSize()) {
             // Image
             if (coverImagePath != null) {
+                // Taps/long-presses are handled by the Card's combinedClickable above — a second
+                // gesture detector here would double-fire (navigate + toggle selection on one tap).
                 AsyncImage(
                     model = coverImagePath,
                     contentDescription = "Leaf image - tap to open, long press to select",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(isSelectionMode) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (isSelectionMode) {
-                                        onClick()
-                                    } else {
-                                        onNavigateToResults(session.id)
-                                    }
-                                },
-                                onLongPress = {
-                                    onLongClick()
-                                }
-                            )
-                        },
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
             } else {

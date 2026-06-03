@@ -23,17 +23,18 @@ class GeminiAiProvider @Inject constructor(
     private val apiKey: String
 ) : AiProvider {
 
-    private val generativeModel: GenerativeModel by lazy {
+    private fun buildModel(temperature: Float, maxTokens: Int): GenerativeModel {
         if (!isConfigured()) {
             throw IllegalStateException("Gemini API key not configured")
         }
-        GenerativeModel(
+        return GenerativeModel(
             modelName = "gemini-2.5-flash",
             apiKey = apiKey,
             generationConfig = GenerationConfig.Builder().apply {
-                temperature = 0.2f
+                this.temperature = temperature
                 topK = 40
                 topP = 0.95f
+                maxOutputTokens = maxTokens
             }.build()
         )
     }
@@ -43,7 +44,9 @@ class GeminiAiProvider @Inject constructor(
         bitmap: Bitmap,
         promptText: String,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        temperature: Float,
+        maxTokens: Int
     ): Result<DiagnosisDisplay> {
         return try {
             val content = content {
@@ -51,10 +54,10 @@ class GeminiAiProvider @Inject constructor(
                 text(promptText)
             }
 
-            val response = generativeModel.generateContent(content)
+            val response = buildModel(temperature, maxTokens).generateContent(content)
             val responseText = response.text ?: throw Exception("Empty response from Gemini")
 
-            Timber.d("Gemini response: $responseText")
+            Timber.d("Gemini response received (%d chars)", responseText.length)
 
             parseGeminiResponse(sessionId, responseText)
         } catch (e: Exception) {
@@ -106,9 +109,10 @@ class GeminiAiProvider @Inject constructor(
 
             Result.success(diagnosis)
         } catch (e: JsonSyntaxException) {
-            Timber.e(e, "Failed to parse Gemini JSON response: $responseText")
-            // Return a fallback diagnosis if parsing fails
-            Result.success(createFallbackDiagnosis(sessionId, responseText))
+            // Don't fabricate a verdict from a keyword scan — a malformed response is a
+            // failure, not a diagnosis. Surface it so the UI can offer a retry.
+            Timber.e(e, "Failed to parse Gemini JSON response (%d chars)", responseText.length)
+            Result.failure(e)
         } catch (e: Exception) {
             Timber.e(e, "Error parsing Gemini response")
             Result.failure(e)
@@ -133,30 +137,6 @@ class GeminiAiProvider @Inject constructor(
         return responseText.trim()
     }
 
-    private fun createFallbackDiagnosis(sessionId: String, responseText: String): DiagnosisDisplay {
-        // Create a basic diagnosis from unparseable response
-        val lowerResponse = responseText.lowercase()
-        val isHealthy = !lowerResponse.contains("disease") &&
-                !lowerResponse.contains("infected") &&
-                !lowerResponse.contains("blight") &&
-                !lowerResponse.contains("rust")
-
-        return DiagnosisDisplay(
-            sessionId = sessionId,
-            isHealthy = isHealthy,
-            healthScore = if (isHealthy) 80 else 50,
-            primaryDiagnosis = if (isHealthy) "Healthy" else "Possible Disease Detected",
-            confidence = 30,
-            diseases = emptyList(),
-            suggestions = listOf(
-                "Analysis completed with limited confidence.",
-                "Consider retaking the image with better lighting.",
-                "Consult a local agricultural expert for confirmation."
-            ),
-            leafDescription = "Unable to generate detailed description. The image may be unclear or the analysis encountered an issue.",
-            analyzedAt = System.currentTimeMillis()
-        )
-    }
 }
 
 // Internal data classes for Gemini JSON parsing

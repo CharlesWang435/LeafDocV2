@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -47,14 +48,17 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManualAlignmentScreen(
-    segments: List<Bitmap>,
+    // Display paths (Coil decodes/downsamples/caches these). The decoded full-res bitmaps stay
+    // in the ViewModel for offset detection / preview / stitching and are never rendered here,
+    // so the VM can recycle them without racing composition.
+    segmentPaths: List<String>,
     overlapPercent: Float,
     onAutoAlign: suspend () -> List<Int>,
     onGeneratePreview: suspend (List<Int>) -> Bitmap?,
     onConfirm: (List<Int>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val offsets = remember { mutableStateListOf<Int>().apply { addAll(List(segments.size) { 0 }) } }
+    val offsets = remember { mutableStateListOf<Int>().apply { addAll(List(segmentPaths.size) { 0 }) } }
 
     var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isGeneratingPreview by remember { mutableStateOf(false) }
@@ -82,8 +86,8 @@ fun ManualAlignmentScreen(
 
     // Sync scroll from segments to preview
     LaunchedEffect(segmentsListState.firstVisibleItemIndex, segmentsListState.firstVisibleItemScrollOffset) {
-        if (segments.isNotEmpty() && previewContentWidth > previewViewportWidth) {
-            val totalItems = segments.size
+        if (segmentPaths.isNotEmpty() && previewContentWidth > previewViewportWidth) {
+            val totalItems = segmentPaths.size
             val scrollFraction = if (totalItems > 1) {
                 (segmentsListState.firstVisibleItemIndex +
                     segmentsListState.firstVisibleItemScrollOffset / 200f) / (totalItems - 1).coerceAtLeast(1)
@@ -136,7 +140,7 @@ fun ManualAlignmentScreen(
                         Column {
                             Text("Align Segments", fontWeight = FontWeight.Bold)
                             Text(
-                                "${segments.size} segments",
+                                "${segmentPaths.size} segments",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -238,9 +242,9 @@ fun ManualAlignmentScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            itemsIndexed(segments) { index, bitmap ->
+                            itemsIndexed(segmentPaths) { index, path ->
                                 SegmentAdjustmentItem(
-                                    bitmap = bitmap,
+                                    path = path,
                                     index = index,
                                     offset = offsets.getOrElse(index) { 0 },
                                     onOffsetChange = { newOffset ->
@@ -309,7 +313,7 @@ fun ManualAlignmentScreen(
     // Fullscreen Segment Viewer
     if (showFullscreenViewer) {
         FullscreenSegmentViewer(
-            segments = segments,
+            paths = segmentPaths,
             initialPage = selectedSegmentIndex,
             onDismiss = { showFullscreenViewer = false }
         )
@@ -318,7 +322,7 @@ fun ManualAlignmentScreen(
 
 @Composable
 private fun SegmentAdjustmentItem(
-    bitmap: Bitmap,
+    path: String,
     index: Int,
     offset: Int,
     onOffsetChange: (Int) -> Unit,
@@ -353,14 +357,12 @@ private fun SegmentAdjustmentItem(
                     .background(Color.Black)
                     .clickable { onThumbnailClick() }
             ) {
-                if (!bitmap.isRecycled) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Segment ${index + 1}",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                }
+                AsyncImage(
+                    model = path,
+                    contentDescription = "Segment ${index + 1}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
             }
 
             Spacer(Modifier.height(8.dp))
@@ -417,11 +419,11 @@ private fun SegmentAdjustmentItem(
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FullscreenSegmentViewer(
-    segments: List<Bitmap>,
+    paths: List<String>,
     initialPage: Int = 0,
     onDismiss: () -> Unit
 ) {
-    val pagerState = rememberPagerState(initialPage = initialPage) { segments.size }
+    val pagerState = rememberPagerState(initialPage = initialPage) { paths.size }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -445,15 +447,12 @@ private fun FullscreenSegmentViewer(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        val bitmap = segments[page]
-                        if (!bitmap.isRecycled) {
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Segment ${page + 1}",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
+                        AsyncImage(
+                            model = paths[page],
+                            contentDescription = "Segment ${page + 1}",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
                     }
                 }
 
@@ -461,7 +460,7 @@ private fun FullscreenSegmentViewer(
                 TopAppBar(
                     title = {
                         Text(
-                            "Frame ${pagerState.currentPage + 1} of ${segments.size}",
+                            "Frame ${pagerState.currentPage + 1} of ${paths.size}",
                             color = Color.White,
                             fontWeight = FontWeight.Bold
                         )
@@ -491,7 +490,7 @@ private fun FullscreenSegmentViewer(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    repeat(segments.size) { index ->
+                    repeat(paths.size) { index ->
                         Box(
                             modifier = Modifier
                                 .size(

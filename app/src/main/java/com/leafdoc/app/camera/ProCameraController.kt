@@ -50,6 +50,11 @@ class ProCameraController(
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
+    // Hard guard against overlapping captures. Two concurrent captures both run unbindAll()
+    // + openCamera() on the same device, colliding (ERROR_CAMERA_IN_USE) and leaving the
+    // preview black. The UI also debounces, but this is the authoritative guard.
+    private val captureInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
@@ -681,15 +686,22 @@ class ProCameraController(
      * has selected a full-sensor size (50/200MP); otherwise uses the standard CameraX path.
      */
     suspend fun captureImage(): CapturedImage {
-        val lens = _currentLens.value
-        val size = _selectedResolution.value
-        val isMaxRes = size != null && lens != null &&
-            lens.maxResSizes.any { it.width == size.width && it.height == size.height }
+        if (!captureInFlight.compareAndSet(false, true)) {
+            throw CaptureInProgressException()
+        }
+        try {
+            val lens = _currentLens.value
+            val size = _selectedResolution.value
+            val isMaxRes = size != null && lens != null &&
+                lens.maxResSizes.any { it.width == size.width && it.height == size.height }
 
-        return when {
-            _rawEnabled.value && lens?.rawSize != null -> captureRaw(lens, lens.rawSize)
-            isMaxRes && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> captureHighRes(lens!!, size!!)
-            else -> captureWithCameraX()
+            return when {
+                _rawEnabled.value && lens?.rawSize != null -> captureRaw(lens, lens.rawSize)
+                isMaxRes && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> captureHighRes(lens!!, size!!)
+                else -> captureWithCameraX()
+            }
+        } finally {
+            captureInFlight.set(false)
         }
     }
 
@@ -859,6 +871,9 @@ class ProCameraController(
         frameAnalyzer = null
     }
 }
+
+/** Thrown when [ProCameraController.captureImage] is called while a capture is already running. */
+class CaptureInProgressException : Exception("Capture already in progress")
 
 sealed class CameraState {
     data object Idle : CameraState()

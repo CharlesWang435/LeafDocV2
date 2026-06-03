@@ -62,8 +62,14 @@ class ResultsViewModel @Inject constructor(
     private val _showAlignmentScreen = MutableStateFlow(false)
     val showAlignmentScreen: StateFlow<Boolean> = _showAlignmentScreen.asStateFlow()
 
-    private val _alignmentBitmaps = MutableStateFlow<List<Bitmap>>(emptyList())
-    val alignmentBitmaps: StateFlow<List<Bitmap>> = _alignmentBitmaps.asStateFlow()
+    // Decoded full-res images used ONLY for offset detection / preview / stitching. Never rendered
+    // by the UI — the alignment screen renders [alignmentPaths] via Coil — so recycling these in
+    // clearAlignmentBitmaps() can't race composition.
+    private var alignmentBitmaps: List<Bitmap> = emptyList()
+
+    // Display paths the alignment screen renders (kept index-aligned with alignmentBitmaps).
+    private val _alignmentPaths = MutableStateFlow<List<String>>(emptyList())
+    val alignmentPaths: StateFlow<List<String>> = _alignmentPaths.asStateFlow()
 
     val overlapPercentage: StateFlow<Int> = preferencesManager.overlapGuidePercentage
         .stateIn(viewModelScope, SharingStarted.Eagerly, 10)
@@ -407,8 +413,9 @@ class ResultsViewModel @Inject constructor(
     fun deleteSession() {
         viewModelScope.launch {
             try {
-                sessionRepository.deleteSession(sessionId)
+                // Files before the row — avoids orphaning files if interrupted mid-delete.
                 imageRepository.deleteSessionImages(sessionId)
+                sessionRepository.deleteSession(sessionId)
                 _uiState.update { it.copy(sessionDeleted = true) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = "Failed to delete: ${e.message}") }
@@ -456,18 +463,22 @@ class ResultsViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
 
             try {
-                // Load all segment bitmaps
-                val bitmaps = currentSegments
+                // Load each segment's full-res bitmap for stitching, keeping a decodable display
+                // path index-aligned (drop any segment whose bitmap fails to decode so counts match).
+                val loaded = currentSegments
                     .sortedBy { it.segmentIndex }
                     .mapNotNull { segment ->
-                        imageRepository.loadBitmap(segment.imagePath)
+                        imageRepository.loadBitmap(segment.imagePath)?.let { bmp ->
+                            bmp to (decodablePath(segment) ?: segment.imagePath)
+                        }
                     }
 
-                if (bitmaps.isEmpty()) {
+                if (loaded.isEmpty()) {
                     throw Exception("Failed to load segment images")
                 }
 
-                _alignmentBitmaps.value = bitmaps
+                alignmentBitmaps = loaded.map { it.first }
+                _alignmentPaths.value = loaded.map { it.second }
                 _uiState.update { it.copy(isLoading = false) }
                 _showAlignmentScreen.value = true
 
@@ -484,7 +495,7 @@ class ResultsViewModel @Inject constructor(
      * Gets auto-detected Y offsets using midrib alignment.
      */
     suspend fun getAutoAlignOffsets(): List<Int> {
-        val bitmaps = _alignmentBitmaps.value
+        val bitmaps = alignmentBitmaps
         if (bitmaps.isEmpty()) return emptyList()
 
         val searchTolerance = midribSearchTolerance.value / 100f
@@ -495,7 +506,7 @@ class ResultsViewModel @Inject constructor(
      * Generates a preview bitmap with the given manual offsets.
      */
     suspend fun generatePreview(offsets: List<Int>): Bitmap? {
-        val bitmaps = _alignmentBitmaps.value
+        val bitmaps = alignmentBitmaps
         if (bitmaps.isEmpty()) return null
 
         val overlapPercent = overlapPercentage.value / 100f
@@ -513,7 +524,7 @@ class ResultsViewModel @Inject constructor(
     fun confirmAlignment(offsets: List<Int>) {
         viewModelScope.launch {
             val sess = session.value ?: return@launch
-            val bitmaps = _alignmentBitmaps.value
+            val bitmaps = alignmentBitmaps
 
             if (bitmaps.isEmpty()) {
                 _uiState.update { it.copy(error = "No images to stitch") }
@@ -597,12 +608,13 @@ class ResultsViewModel @Inject constructor(
      * Clears and recycles alignment bitmaps to free memory.
      */
     private fun clearAlignmentBitmaps() {
-        _alignmentBitmaps.value.forEach { bitmap ->
+        alignmentBitmaps.forEach { bitmap ->
             if (!bitmap.isRecycled) {
                 bitmap.recycle()
             }
         }
-        _alignmentBitmaps.value = emptyList()
+        alignmentBitmaps = emptyList()
+        _alignmentPaths.value = emptyList()
     }
 }
 

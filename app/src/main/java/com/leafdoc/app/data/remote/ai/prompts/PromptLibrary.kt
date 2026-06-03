@@ -13,7 +13,7 @@ CORN DISEASE DATABASE (Focus on these common diseases):
 - Gray Leaf Spot (Cercospora zeae-maydis) - Rectangular gray/tan lesions
 - Southern Corn Leaf Blight (Cochliobolus heterostrophus) - Small tan lesions with dark borders
 - Common Rust (Puccinia sorghi) - Orange-brown pustules on both leaf surfaces
-- Anthracene (Colletotrichum graminicola) - Irregular necrotic lesions
+- Anthracnose (Colletotrichum graminicola) - Irregular necrotic lesions
 - Goss's Wilt (Clavibacter michiganensis) - Water-soaked lesions with freckles
 - Eyespot (Aureobasidium zeae) - Small circular lesions with tan centers
 - Holcus Spot (Pseudomonas syringae) - Small round tan spots

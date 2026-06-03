@@ -1,5 +1,7 @@
 package com.leafdoc.app.data.repository
 
+import androidx.room.withTransaction
+import com.leafdoc.app.data.local.LeafDocDatabase
 import com.leafdoc.app.data.local.LeafSegmentDao
 import com.leafdoc.app.data.local.LeafSessionDao
 import com.leafdoc.app.data.model.DiagnosisStatus
@@ -11,6 +13,7 @@ import javax.inject.Singleton
 
 @Singleton
 class LeafSessionRepository @Inject constructor(
+    private val database: LeafDocDatabase,
     private val sessionDao: LeafSessionDao,
     private val segmentDao: LeafSegmentDao
 ) {
@@ -112,37 +115,41 @@ class LeafSessionRepository @Inject constructor(
         overlapPercentage: Float = 0f,
         isMultiFrameSession: Boolean = true
     ): LeafSegment {
-        val nextIndex = (segmentDao.getMaxSegmentIndex(sessionId) ?: -1) + 1
+        // Index read, segment insert, and the denormalized count bump must be atomic —
+        // process death between them permanently desyncs segmentCount (it's never recomputed).
+        return database.withTransaction {
+            val nextIndex = (segmentDao.getMaxSegmentIndex(sessionId) ?: -1) + 1
 
-        // Generate frame label only for multi-frame sessions (user preference)
-        val frameLabel = if (isMultiFrameSession) {
-            "Frame ${nextIndex + 1}"
-        } else {
-            null
+            // Generate frame label only for multi-frame sessions (user preference)
+            val frameLabel = if (isMultiFrameSession) {
+                "Frame ${nextIndex + 1}"
+            } else {
+                null
+            }
+
+            val segment = LeafSegment(
+                sessionId = sessionId,
+                segmentIndex = nextIndex,
+                imagePath = imagePath,
+                thumbnailPath = thumbnailPath,
+                width = width,
+                height = height,
+                iso = iso,
+                shutterSpeed = shutterSpeed,
+                aperture = aperture,
+                focalLength = focalLength,
+                whiteBalance = whiteBalance,
+                exposureCompensation = exposureCompensation,
+                focusDistance = focusDistance,
+                frameLabel = frameLabel,
+                overlapPercentage = overlapPercentage
+            )
+
+            segmentDao.insertSegment(segment)
+            sessionDao.incrementSegmentCount(sessionId)
+
+            segment
         }
-
-        val segment = LeafSegment(
-            sessionId = sessionId,
-            segmentIndex = nextIndex,
-            imagePath = imagePath,
-            thumbnailPath = thumbnailPath,
-            width = width,
-            height = height,
-            iso = iso,
-            shutterSpeed = shutterSpeed,
-            aperture = aperture,
-            focalLength = focalLength,
-            whiteBalance = whiteBalance,
-            exposureCompensation = exposureCompensation,
-            focusDistance = focusDistance,
-            frameLabel = frameLabel,
-            overlapPercentage = overlapPercentage
-        )
-
-        segmentDao.insertSegment(segment)
-        sessionDao.incrementSegmentCount(sessionId)
-
-        return segment
     }
 
     suspend fun updateSegment(segment: LeafSegment) {

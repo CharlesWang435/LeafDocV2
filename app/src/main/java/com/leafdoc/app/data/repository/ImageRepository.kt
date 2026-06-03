@@ -51,6 +51,14 @@ class ImageRepository @Inject constructor(
         File(context.cacheDir, "thumbnails").apply { mkdirs() }
     }
 
+    // Load-bearing display/AI proxies for masters Android can't decode (TIFF) live in
+    // filesDir, NOT cacheDir: the OS evicts cacheDir under storage pressure and
+    // clearThumbnailCache() wipes it, which would leave a TIFF segment permanently
+    // unviewable and un-diagnosable. These are persistent app data, not throwaway cache.
+    private val proxyDir: File by lazy {
+        File(context.filesDir, "proxies").apply { mkdirs() }
+    }
+
     suspend fun saveSegmentImage(
         bitmap: Bitmap,
         sessionId: String,
@@ -171,7 +179,8 @@ class ImageRepository @Inject constructor(
         // so keep it reasonably large rather than a tiny thumbnail.
         maxSize: Int = 1024
     ): String = withContext(Dispatchers.IO) {
-        val thumbnailFile = File(thumbnailDir, "thumb_${sessionId}_${segmentIndex}_${dateFormat.format(Date())}.jpg")
+        // Persisted in proxyDir (filesDir), not thumbnailDir (cacheDir) — see proxyDir docs.
+        val thumbnailFile = File(proxyDir, "thumb_${sessionId}_${segmentIndex}_${dateFormat.format(Date())}.jpg")
 
         val scale = (maxOf(bitmap.width, bitmap.height) / maxSize).coerceAtLeast(1)
         val thumb = if (scale > 1) {
@@ -186,6 +195,27 @@ class ImageRepository @Inject constructor(
         if (thumb != bitmap) thumb.recycle()
 
         thumbnailFile.absolutePath
+    }
+
+    /**
+     * Writes a transient, downsampled JPEG preview of an in-memory capture to the cache and
+     * returns its path. Used by Simple-mode review so the overlay can render the capture via
+     * Coil (off a file) instead of holding the live full-res bitmap in composition — which would
+     * crash if the ViewModel recycled it mid-draw. Caller is responsible for deleting it.
+     */
+    suspend fun saveReviewPreview(bitmap: Bitmap, maxSize: Int = 1600): String = withContext(Dispatchers.IO) {
+        val file = File(context.cacheDir, "review_${System.nanoTime()}.jpg")
+        val scale = (maxOf(bitmap.width, bitmap.height) / maxSize).coerceAtLeast(1)
+        val preview = if (scale > 1) {
+            Bitmap.createScaledBitmap(bitmap, bitmap.width / scale, bitmap.height / scale, true)
+        } else {
+            bitmap
+        }
+        FileOutputStream(file).use { out ->
+            preview.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        if (preview != bitmap) preview.recycle()
+        file.absolutePath
     }
 
     suspend fun createThumbnail(
@@ -448,6 +478,11 @@ class ImageRepository @Inject constructor(
         stitchedDir.listFiles()?.filter { it.name.contains(sessionId) }?.forEach {
             it.delete()
         }
+
+        // Delete the session's display/AI proxies (filenames are thumb_<sessionId>_...)
+        proxyDir.listFiles()?.filter { it.name.contains(sessionId) }?.forEach {
+            it.delete()
+        }
     }
 
     suspend fun deleteImage(imagePath: String) = withContext(Dispatchers.IO) {
@@ -457,7 +492,8 @@ class ImageRepository @Inject constructor(
     suspend fun getStorageUsage(): StorageInfo = withContext(Dispatchers.IO) {
         val segmentsSize = segmentsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         val stitchedSize = stitchedDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        val thumbnailSize = thumbnailDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        val thumbnailSize = (thumbnailDir.walkTopDown() + proxyDir.walkTopDown())
+            .filter { it.isFile }.sumOf { it.length() }
 
         StorageInfo(
             segmentsBytes = segmentsSize,
@@ -468,6 +504,8 @@ class ImageRepository @Inject constructor(
     }
 
     suspend fun clearThumbnailCache() = withContext(Dispatchers.IO) {
+        // Only the throwaway 256px thumbnails. Do NOT touch proxyDir — those are the only
+        // renderable copy of TIFF segments and deleting them is permanent data loss.
         thumbnailDir.deleteRecursively()
         thumbnailDir.mkdirs()
     }

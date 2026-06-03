@@ -168,15 +168,32 @@ class HighResCaptureEngine(private val context: Context) {
         jpegFile: File,
         handler: Handler
     ): Unit = suspendCancellableCoroutine { cont ->
+        // All callbacks below run on the single capture HandlerThread, so this state is
+        // touched serially — no locking needed. `resolved` makes resume happen exactly once
+        // (a continuation resumed twice crashes), and guarantees the full-sensor RAW Image is
+        // closed on every terminal path (the ImageReader has only 1 buffer; a leaked Image
+        // jams the next RAW capture).
         var rawImage: Image? = null
         var totalResult: TotalCaptureResult? = null
         var jpegDone = false
         var dngDone = false
-        var finished = false
+        var resolved = false
+
+        fun closeRawImage() {
+            try { rawImage?.close() } catch (_: Exception) {}
+            rawImage = null
+        }
+
+        fun resolveError(e: Throwable) {
+            if (resolved) return
+            resolved = true
+            closeRawImage()
+            if (cont.isActive) cont.resumeWithException(e)
+        }
 
         fun finishIfReady() {
-            if (jpegDone && dngDone && !finished) {
-                finished = true
+            if (jpegDone && dngDone && !resolved) {
+                resolved = true
                 if (cont.isActive) cont.resume(Unit)
             }
         }
@@ -185,29 +202,33 @@ class HighResCaptureEngine(private val context: Context) {
         fun tryWriteDng() {
             val img = rawImage
             val res = totalResult
-            if (img != null && res != null && !dngDone) {
+            if (img != null && res != null && !dngDone && !resolved) {
                 try {
                     DngCreator(characteristics, res).use { dng ->
                         dng.setOrientation(exifFromDegrees(sensorOrientation))
                         FileOutputStream(dngFile).use { dng.writeImage(it, img) }
                     }
                     dngDone = true
-                    img.close()
-                    rawImage = null
+                    closeRawImage()
                     finishIfReady()
                 } catch (e: Exception) {
-                    if (cont.isActive) cont.resumeWithException(e)
+                    resolveError(e)
                 }
             }
         }
 
         rawReader.setOnImageAvailableListener({ r ->
-            rawImage = try { r.acquireNextImage() } catch (e: Exception) { null }
+            val img = try { r.acquireNextImage() } catch (e: Exception) { null }
+            if (img == null) { resolveError(Exception("No RAW image produced")); return@setOnImageAvailableListener }
+            if (resolved) { try { img.close() } catch (_: Exception) {}; return@setOnImageAvailableListener }
+            rawImage = img
             tryWriteDng()
         }, handler)
 
         jpegReader.setOnImageAvailableListener({ r ->
-            val image = try { r.acquireNextImage() } catch (e: Exception) { null } ?: return@setOnImageAvailableListener
+            val image = try { r.acquireNextImage() } catch (e: Exception) { null }
+            if (image == null) { resolveError(Exception("No companion JPEG produced")); return@setOnImageAvailableListener }
+            if (resolved) { try { image.close() } catch (_: Exception) {}; return@setOnImageAvailableListener }
             try {
                 val buffer = image.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
@@ -216,11 +237,14 @@ class HighResCaptureEngine(private val context: Context) {
                 jpegDone = true
                 finishIfReady()
             } catch (e: Exception) {
-                if (cont.isActive) cont.resumeWithException(e)
+                resolveError(e)
             } finally {
                 image.close()
             }
         }, handler)
+
+        // If the calling coroutine is cancelled mid-capture, drop the in-flight sensor buffer.
+        cont.invokeOnCancellation { closeRawImage() }
 
         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
             addTarget(rawReader.surface)
@@ -236,7 +260,7 @@ class HighResCaptureEngine(private val context: Context) {
                 tryWriteDng()
             }
             override fun onCaptureFailed(s: CameraCaptureSession, req: CaptureRequest, failure: CaptureFailure) {
-                if (cont.isActive) cont.resumeWithException(Exception("RAW capture failed: reason ${failure.reason}"))
+                resolveError(Exception("RAW capture failed: reason ${failure.reason}"))
             }
         }, handler)
     }
