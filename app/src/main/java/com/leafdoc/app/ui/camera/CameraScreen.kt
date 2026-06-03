@@ -100,6 +100,9 @@ fun CameraScreen(
     val histogramData by cameraController?.histogramData?.collectAsState() ?: remember { mutableStateOf(null) }
     val currentLens by cameraController?.currentLens?.collectAsState() ?: remember { mutableStateOf(null) }
     val selectedResolution by cameraController?.selectedResolution?.collectAsState() ?: remember { mutableStateOf<android.util.Size?>(null) }
+    val rawEnabled by cameraController?.rawEnabled?.collectAsState() ?: remember { mutableStateOf(false) }
+    val zoomRatio by cameraController?.zoomRatio?.collectAsState() ?: remember { mutableStateOf(1f) }
+    val zoomRange by cameraController?.zoomRange?.collectAsState() ?: remember { mutableStateOf(1f to 1f) }
 
     val permissions = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -210,8 +213,14 @@ fun CameraScreen(
                 availableLenses = cameraCapabilities?.availableLenses ?: emptyList(),
                 currentLens = currentLens,
                 onLensSelected = { lens -> cameraController?.switchLens(lens) },
+                zoomRatio = zoomRatio,
+                zoomRange = zoomRange,
+                onZoomSelected = { z -> cameraController?.setZoom(z) },
                 selectedResolution = selectedResolution,
                 onResolutionSelected = { size -> cameraController?.selectResolution(size) },
+                rawSupported = currentLens?.rawSize != null,
+                rawEnabled = rawEnabled,
+                onToggleRaw = { cameraController?.setRawEnabled(!rawEnabled) },
                 segmentCount = uiState.segmentCount,
                 onSettingsClick = onNavigateToSettings,
                 onGalleryClick = onNavigateToGallery,
@@ -279,8 +288,12 @@ fun CameraScreen(
                 onStartSession = { showSessionDialog = true },
                 onCapture = {
                     scope.launch {
-                        cameraController?.captureImage()?.let { image ->
-                            viewModel.onImageCaptured(image)
+                        try {
+                            cameraController?.captureImage()?.let { image ->
+                                viewModel.onImageCaptured(image)
+                            }
+                        } catch (e: Exception) {
+                            viewModel.reportCaptureError(e.message ?: "Capture failed")
                         }
                     }
                 },
@@ -378,8 +391,14 @@ private fun TopBar(
     availableLenses: List<LensInfo>,
     currentLens: LensInfo?,
     onLensSelected: (LensInfo) -> Unit,
+    zoomRatio: Float,
+    zoomRange: Pair<Float, Float>,
+    onZoomSelected: (Float) -> Unit,
     selectedResolution: android.util.Size?,
     onResolutionSelected: (android.util.Size?) -> Unit,
+    rawSupported: Boolean,
+    rawEnabled: Boolean,
+    onToggleRaw: () -> Unit,
     showLockControlsPanel: Boolean,
     onToggleLockControlsPanel: () -> Unit,
     cropRectEnabled: Boolean,
@@ -468,12 +487,13 @@ private fun TopBar(
             }
         }
 
-        // Lens selector (if multiple lenses available)
-        if (availableLenses.size > 1) {
-            LensSelector(
-                availableLenses = availableLenses,
-                currentLens = currentLens,
-                onLensSelected = onLensSelected
+        // Zoom/lens selector — on modern phones the ultra-wide/main/tele lenses are fused
+        // behind one logical camera and selected by zoom ratio (stock-camera 0.6x/1x/3x/5x).
+        if (zoomRange.second > zoomRange.first) {
+            ZoomSelector(
+                zoomRatio = zoomRatio,
+                zoomRange = zoomRange,
+                onZoomSelected = onZoomSelected
             )
         }
 
@@ -485,6 +505,26 @@ private fun TopBar(
                 selected = selectedResolution,
                 onSelected = onResolutionSelected
             )
+        }
+
+        // RAW/DNG toggle (only when the current lens supports RAW)
+        if (rawSupported) {
+            IconButton(
+                onClick = onToggleRaw,
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(
+                        if (rawEnabled) Color.Cyan.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
+                        CircleShape
+                    )
+            ) {
+                Text(
+                    text = "RAW",
+                    color = if (rawEnabled) Color.Black else Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         IconButton(
@@ -1487,6 +1527,64 @@ private fun HorizontalToggleButton(
  * Lens selector dropdown for switching between available camera lenses
  */
 @Composable
+private fun zoomLabel(z: Float): String =
+    if (z % 1f == 0f) "${z.toInt()}×" else "${"%.1f".format(z)}×"
+
+@Composable
+private fun ZoomSelector(
+    zoomRatio: Float,
+    zoomRange: Pair<Float, Float>,
+    onZoomSelected: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val (min, max) = zoomRange
+    // Standard zoom stops (ultra-wide → tele), clamped to what this camera supports.
+    val presets = remember(min, max) {
+        (listOf(min, 0.6f, 1f, 2f, 3f, 5f, 10f, max))
+            .filter { it in min..max }
+            .distinctBy { "%.1f".format(it) }
+            .sorted()
+    }
+
+    Box(modifier = modifier) {
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier
+                .size(40.dp)
+                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+        ) {
+            Text(
+                text = zoomLabel(zoomRatio),
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color.Black.copy(alpha = 0.9f))
+        ) {
+            presets.forEach { z ->
+                val isSel = "%.1f".format(z) == "%.1f".format(zoomRatio)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = zoomLabel(z),
+                            color = if (isSel) Color.Cyan else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    onClick = { onZoomSelected(z); expanded = false }
+                )
+            }
+        }
+    }
+}
+
 private fun megapixelLabel(size: android.util.Size): String {
     val mp = (size.width.toLong() * size.height) / 1_000_000.0
     return if (mp >= 1.0) "${"%.0f".format(mp)}MP" else "${size.width}×${size.height}"

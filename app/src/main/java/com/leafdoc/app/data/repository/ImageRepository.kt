@@ -85,6 +85,61 @@ class ImageRepository @Inject constructor(
         file.absolutePath
     }
 
+    /**
+     * Moves an already-encoded capture file (e.g. a full-sensor JPEG written straight from
+     * the Camera2 ImageReader) into the session's segments directory — no decode/re-encode,
+     * preserving the original bytes and avoiding a huge bitmap allocation.
+     */
+    suspend fun saveSegmentFile(
+        srcPath: String,
+        sessionId: String,
+        segmentIndex: Int
+    ): String = withContext(Dispatchers.IO) {
+        val sessionDir = File(segmentsDir, sessionId).apply { mkdirs() }
+        val src = File(srcPath)
+        val ext = src.extension.ifEmpty { "jpg" }
+        val dest = File(sessionDir, "segment_${segmentIndex}_${dateFormat.format(Date())}.$ext")
+        if (!src.renameTo(dest)) {
+            src.copyTo(dest, overwrite = true)
+            src.delete()
+        }
+        dest.absolutePath
+    }
+
+    /**
+     * Saves a captured RAW/DNG master to shared storage (Pictures/LeafDoc) so it's immediately
+     * available in the device gallery / Files for off-device scientific use. Consumes the temp file.
+     */
+    suspend fun saveRawToGallery(srcPath: String, fileName: String): Boolean = withContext(Dispatchers.IO) {
+        val src = File(srcPath)
+        if (!src.exists()) return@withContext false
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/LeafDoc")
+                }
+                val uri = context.contentResolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues
+                ) ?: return@withContext false
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+            } else {
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "LeafDoc"
+                ).apply { mkdirs() }
+                src.copyTo(File(dir, fileName), overwrite = true)
+            }
+            src.delete()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /** File extension for a captured segment/stitched image in the given format. */
     private fun captureExtension(format: CaptureFormat): String = when (format) {
         CaptureFormat.JPEG -> "jpg"

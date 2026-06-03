@@ -186,34 +186,65 @@ class CameraViewModel @Inject constructor(
 
             try {
                 val segmentIndex = _capturedSegments.value.size
+                val segWidth: Int
+                val segHeight: Int
 
-                // Crop the captured image according to the crop rectangle (if enabled)
-                // When disabled, use the full captured bitmap without any modifications
-                croppedBitmap = if (_cropRectEnabled.value) {
-                    val currentCropRect = _cropRect.value
-                    cropBitmap(capturedImage.bitmap, currentCropRect)
+                if (capturedImage.filePath != null) {
+                    // High-res (full-sensor) capture: the JPEG is already on disk. Move it in
+                    // as-is — no decode, no re-encode. Crop is NOT applied at max resolution
+                    // (we keep the full-frame max-res image); use a standard size to crop.
+                    imagePath = imageRepository.saveSegmentFile(
+                        srcPath = capturedImage.filePath,
+                        sessionId = session.id,
+                        segmentIndex = segmentIndex
+                    )
+                    // Coil downsamples the full JPEG and honors EXIF orientation, so we reuse it
+                    // as its own thumbnail rather than re-encoding a (sideways) thumbnail.
+                    thumbnailPath = imagePath
+                    segWidth = capturedImage.width
+                    segHeight = capturedImage.height
+
+                    // RAW master: save the .dng to the shared gallery for off-device use.
+                    capturedImage.dngFilePath?.let { dngPath ->
+                        val ts = System.currentTimeMillis()
+                        val parts = mutableListOf("LeafDoc")
+                        if (session.farmerId.isNotEmpty()) parts.add(session.farmerId.take(20))
+                        if (session.fieldId.isNotEmpty()) parts.add(session.fieldId.take(20))
+                        parts.add("Leaf${session.leafNumber}")
+                        parts.add("seg${segmentIndex + 1}")
+                        parts.add(ts.toString())
+                        imageRepository.saveRawToGallery(dngPath, "${parts.joinToString("_")}.dng")
+                    }
                 } else {
-                    // Use the entire captured image without any cropping at all
-                    // Just create a copy to maintain consistent memory management
-                    capturedImage.bitmap.copy(capturedImage.bitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                    val sourceBitmap = capturedImage.bitmap
+                        ?: throw Exception("Captured image has no bitmap")
+
+                    // Crop the captured image according to the crop rectangle (if enabled)
+                    croppedBitmap = if (_cropRectEnabled.value) {
+                        cropBitmap(sourceBitmap, _cropRect.value)
+                    } else {
+                        sourceBitmap.copy(sourceBitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                    }
+
+                    // Save in the user-selected capture format
+                    val captureFormat = _cameraSettings.value.captureFormat
+                    imagePath = imageRepository.saveSegmentImage(
+                        bitmap = croppedBitmap,
+                        sessionId = session.id,
+                        segmentIndex = segmentIndex,
+                        format = captureFormat
+                    )
+
+                    // Displayable JPEG thumbnail straight from the bitmap so PNG/TIFF segments
+                    // (which Coil can't render) still show in the gallery and results.
+                    thumbnailPath = imageRepository.createThumbnailFromBitmap(
+                        bitmap = croppedBitmap,
+                        sessionId = session.id,
+                        segmentIndex = segmentIndex
+                    )
+                    segWidth = croppedBitmap.width
+                    segHeight = croppedBitmap.height
                 }
-
-                // Save cropped image to storage in the user-selected capture format
-                val captureFormat = _cameraSettings.value.captureFormat
-                imagePath = imageRepository.saveSegmentImage(
-                    bitmap = croppedBitmap,
-                    sessionId = session.id,
-                    segmentIndex = segmentIndex,
-                    format = captureFormat
-                )
-
-                // Create a displayable JPEG thumbnail straight from the bitmap so PNG/TIFF
-                // segments (which Coil can't render) still show in the gallery and results.
-                thumbnailPath = imageRepository.createThumbnailFromBitmap(
-                    bitmap = croppedBitmap,
-                    sessionId = session.id,
-                    segmentIndex = segmentIndex
-                )
 
                 // Use fixed overlap percentage from settings (no auto-calculation)
                 val overlap = overlapPercentage.value / 100f
@@ -227,8 +258,8 @@ class CameraViewModel @Inject constructor(
                     sessionId = session.id,
                     imagePath = imagePath,
                     thumbnailPath = thumbnailPath,
-                    width = croppedBitmap.width,
-                    height = croppedBitmap.height,
+                    width = segWidth,
+                    height = segHeight,
                     iso = capturedImage.iso,
                     shutterSpeed = capturedImage.shutterSpeed,
                     focusDistance = capturedImage.focusDistance,
@@ -718,6 +749,10 @@ class CameraViewModel @Inject constructor(
         updateCameraSettings(_cameraSettings.value.copy(
             showZebras = !_cameraSettings.value.showZebras
         ))
+    }
+
+    fun reportCaptureError(message: String) {
+        _uiState.update { it.copy(isProcessing = false, error = "Capture failed: $message") }
     }
 
     fun clearError() {
