@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -35,7 +37,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -394,7 +399,7 @@ fun CameraScreen(
                             )
                         }
                         .size(72.dp)
-                        .border(2.dp, Color.Yellow, CircleShape)
+                        .border(2.dp, LeafAccent, CircleShape)
                 )
                 LaunchedEffect(pt) {
                     kotlinx.coroutines.delay(800)
@@ -1345,11 +1350,14 @@ private fun SessionStartDialog(
                     options = treatmentOptions,
                     modifier = Modifier.fillMaxWidth()
                 )
+                val dialogFocus = LocalFocusManager.current
                 OutlinedTextField(
                     value = leafNumber,
                     onValueChange = { leafNumber = it.filter { c -> c.isDigit() } },
                     label = { Text("Leaf Number") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { dialogFocus.clearFocus() }),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1388,6 +1396,7 @@ private fun OptionComboField(
     colors: androidx.compose.material3.TextFieldColors = OutlinedTextFieldDefaults.colors()
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     ExposedDropdownMenuBox(
         expanded = expanded && options.isNotEmpty(),
         onExpandedChange = { if (options.isNotEmpty()) expanded = it },
@@ -1398,6 +1407,9 @@ private fun OptionComboField(
             onValueChange = onValueChange,
             label = { Text(label, fontSize = 11.sp) },
             singleLine = true,
+            // "Done" dismisses the keyboard and clears focus so the cursor stops blinking.
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             trailingIcon = {
                 if (options.isNotEmpty()) ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
