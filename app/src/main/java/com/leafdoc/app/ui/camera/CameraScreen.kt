@@ -49,10 +49,12 @@ import com.leafdoc.app.camera.CameraCapabilities
 import com.leafdoc.app.camera.CapturedImage
 import com.leafdoc.app.camera.CameraState
 import com.leafdoc.app.camera.LensInfo
-import com.leafdoc.app.camera.LensType
 import com.leafdoc.app.camera.ProCameraController
 import com.leafdoc.app.data.model.*
 import kotlinx.coroutines.launch
+
+/** Leaf-green accent used for selected/active controls in the camera UI (matches the app theme). */
+private val LeafAccent = Color(0xFF60AD5E)
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -145,9 +147,18 @@ fun CameraScreen(
         }
     }
 
+    // Auto-dismiss transient status messages and errors (no Scaffold here, so we show
+    // lightweight overlays and clear them after a short delay).
+    LaunchedEffect(uiState.message) {
+        if (uiState.message != null) {
+            kotlinx.coroutines.delay(3000)
+            viewModel.clearMessage()
+        }
+    }
     LaunchedEffect(uiState.error) {
-        uiState.error?.let {
-            // Show error snackbar
+        if (uiState.error != null) {
+            kotlinx.coroutines.delay(4000)
+            viewModel.clearError()
         }
     }
 
@@ -234,9 +245,7 @@ fun CameraScreen(
             // Top Bar with pop-out trigger/panel in center and lens selector
             TopBar(
                 sessionActive = uiState.sessionActive,
-                availableLenses = cameraCapabilities?.availableLenses ?: emptyList(),
                 currentLens = currentLens,
-                onLensSelected = { lens -> cameraController?.switchLens(lens) },
                 zoomRatio = zoomRatio,
                 zoomRange = zoomRange,
                 onZoomSelected = { z -> cameraController?.setZoom(z) },
@@ -335,8 +344,8 @@ fun CameraScreen(
                     .padding(bottom = 24.dp)
             )
 
-            // Captured Segments Strip
-            if (capturedSegments.isNotEmpty()) {
+            // Captured Segments Strip (hidden while the focus panel is open to avoid overlap)
+            if (capturedSegments.isNotEmpty() && !showFocusPanel) {
                 SegmentsStrip(
                     segments = capturedSegments,
                     modifier = Modifier
@@ -404,15 +413,27 @@ fun CameraScreen(
                 )
             }
 
-            // Status Message
+            // Status Message — top-anchored; in Simple mode it sits below the metadata bar so it
+            // never collides with the focus panel / controls at the bottom.
             uiState.message?.let { message ->
                 StatusMessage(
                     message = message,
                     modifier = Modifier
-                        .align(if (simpleMode) Alignment.BottomCenter else Alignment.TopCenter)
+                        .align(Alignment.TopCenter)
                         .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(top = if (simpleMode) 0.dp else 72.dp, bottom = if (simpleMode) 150.dp else 0.dp)
+                        .padding(top = if (simpleMode) 224.dp else 72.dp, start = 16.dp, end = 16.dp)
+                )
+            }
+
+            // Error overlay (red), shown over the preview and auto-dismissed.
+            uiState.error?.let { error ->
+                StatusMessage(
+                    message = error,
+                    color = Color.Red.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = if (simpleMode) 224.dp else 72.dp, start = 16.dp, end = 16.dp)
                 )
             }
 
@@ -494,9 +515,7 @@ private fun TopBar(
     segmentCount: Int,
     onSettingsClick: () -> Unit,
     onGalleryClick: () -> Unit,
-    availableLenses: List<LensInfo>,
     currentLens: LensInfo?,
-    onLensSelected: (LensInfo) -> Unit,
     zoomRatio: Float,
     zoomRange: Pair<Float, Float>,
     onZoomSelected: (Float) -> Unit,
@@ -521,14 +540,17 @@ private fun TopBar(
     onToggleMidribAlignment: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    Column(modifier = modifier) {
     Row(
-        modifier = modifier,
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Gallery (top-left)
         IconButton(
             onClick = onGalleryClick,
             modifier = Modifier
+                .size(40.dp)
                 .background(Color.Black.copy(alpha = 0.5f), CircleShape)
         ) {
             Icon(
@@ -563,33 +585,21 @@ private fun TopBar(
                     )
                 }
             }
-        } else if (showLockControlsPanel) {
-            // Horizontal controls panel (replaces the arrow when expanded)
-            HorizontalLockControlsPanel(
-                cropRectEnabled = cropRectEnabled,
-                cropRectLocked = cropRectLocked,
-                midribGuideLocked = midribGuideLocked,
-                midribGuideEnabled = midribGuideEnabled,
-                midribAlignmentEnabled = midribAlignmentEnabled,
-                onToggleCropEnabled = onToggleCropEnabled,
-                onToggleCropLock = onToggleCropLock,
-                onToggleMidribLock = onToggleMidribLock,
-                onToggleMidribGuide = onToggleMidribGuide,
-                onToggleMidribAlignment = onToggleMidribAlignment,
-                onClose = onToggleLockControlsPanel
-            )
         } else {
-            // Pop-out panel trigger button (center, circular)
+            // Toggle for the overlay-controls row (crop / midrib / align) shown BELOW the bar.
             IconButton(
                 onClick = onToggleLockControlsPanel,
                 modifier = Modifier
                     .size(40.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    .background(
+                        if (showLockControlsPanel) LeafAccent.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
+                        CircleShape
+                    )
             ) {
                 Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Expand panel",
-                    tint = Color.White,
+                    imageVector = if (showLockControlsPanel) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Toggle overlay controls",
+                    tint = if (showLockControlsPanel) Color.Black else Color.White,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -622,7 +632,7 @@ private fun TopBar(
                 modifier = Modifier
                     .size(40.dp)
                     .background(
-                        if (rawEnabled) Color.Cyan.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
+                        if (rawEnabled) LeafAccent.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
                         CircleShape
                     )
             ) {
@@ -641,7 +651,7 @@ private fun TopBar(
             modifier = Modifier
                 .size(40.dp)
                 .background(
-                    if (focusActive) Color.Cyan.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
+                    if (focusActive) LeafAccent.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.5f),
                     CircleShape
                 )
         ) {
@@ -662,6 +672,28 @@ private fun TopBar(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
                 tint = Color.White
+            )
+        }
+    }
+
+        // Overlay-controls panel — its own full-width row BELOW the bar, so it never
+        // overlaps the lens / resolution / RAW / focus / settings icons.
+        if (!sessionActive && showLockControlsPanel) {
+            HorizontalLockControlsPanel(
+                cropRectEnabled = cropRectEnabled,
+                cropRectLocked = cropRectLocked,
+                midribGuideLocked = midribGuideLocked,
+                midribGuideEnabled = midribGuideEnabled,
+                midribAlignmentEnabled = midribAlignmentEnabled,
+                onToggleCropEnabled = onToggleCropEnabled,
+                onToggleCropLock = onToggleCropLock,
+                onToggleMidribLock = onToggleMidribLock,
+                onToggleMidribGuide = onToggleMidribGuide,
+                onToggleMidribAlignment = onToggleMidribAlignment,
+                onClose = onToggleLockControlsPanel,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 8.dp)
             )
         }
     }
@@ -1139,11 +1171,12 @@ private fun SegmentsStrip(
 @Composable
 private fun StatusMessage(
     message: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    color: Color = Color.Black.copy(alpha = 0.7f)
 ) {
     Surface(
         modifier = modifier,
-        color = Color.Black.copy(alpha = 0.7f),
+        color = color,
         shape = RoundedCornerShape(8.dp)
     ) {
         Text(
@@ -1857,26 +1890,7 @@ private fun HorizontalLockControlsPanel(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Close button (up arrow)
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowUp,
-                    contentDescription = "Close panel",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            // Divider
-            Box(
-                modifier = Modifier
-                    .width(1.dp)
-                    .height(28.dp)
-                    .background(Color.White.copy(alpha = 0.3f))
-            )
+            // (The top-bar arrow toggles this panel, so no separate close button is needed.)
 
             // Crop rectangle enabled toggle
             HorizontalToggleButton(
@@ -1884,7 +1898,7 @@ private fun HorizontalLockControlsPanel(
                 isActive = cropRectEnabled,
                 activeIcon = Icons.Default.CropFree,
                 inactiveIcon = Icons.Outlined.CropFree,
-                activeColor = Color.Cyan,
+                activeColor = LeafAccent,
                 onClick = onToggleCropEnabled
             )
 
@@ -1906,7 +1920,7 @@ private fun HorizontalLockControlsPanel(
                 isActive = midribGuideEnabled,
                 activeIcon = Icons.Default.Straighten,
                 inactiveIcon = Icons.Outlined.Straighten,
-                activeColor = Color.Cyan,
+                activeColor = LeafAccent,
                 onClick = onToggleMidribGuide
             )
 
@@ -1928,7 +1942,7 @@ private fun HorizontalLockControlsPanel(
                 isActive = midribAlignmentEnabled,
                 activeIcon = Icons.Default.AutoFixHigh,
                 inactiveIcon = Icons.Outlined.AutoFixOff,
-                activeColor = Color.Cyan,
+                activeColor = LeafAccent,
                 onClick = onToggleMidribAlignment
             )
         }
@@ -2016,7 +2030,7 @@ private fun ZoomSelector(
                     text = {
                         Text(
                             text = zoomLabel(z),
-                            color = if (isSel) Color.Cyan else Color.White,
+                            color = if (isSel) LeafAccent else Color.White,
                             fontSize = 14.sp,
                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                         )
@@ -2070,7 +2084,7 @@ private fun ResolutionSelector(
                     Text(
                         text = maxSize?.let { "Auto (Max) · ${megapixelLabel(it)} · ${it.width}×${it.height}" }
                             ?: "Auto (Max)",
-                        color = if (selected == null) Color.Cyan else Color.White,
+                        color = if (selected == null) LeafAccent else Color.White,
                         fontSize = 14.sp,
                         fontWeight = if (selected == null) FontWeight.Bold else FontWeight.Normal
                     )
@@ -2083,7 +2097,7 @@ private fun ResolutionSelector(
                     text = {
                         Text(
                             text = "${megapixelLabel(size)}  ·  ${size.width}×${size.height}",
-                            color = if (isSel) Color.Cyan else Color.White,
+                            color = if (isSel) LeafAccent else Color.White,
                             fontSize = 14.sp,
                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                         )
@@ -2095,79 +2109,4 @@ private fun ResolutionSelector(
     }
 }
 
-@Composable
-private fun LensSelector(
-    availableLenses: List<LensInfo>,
-    currentLens: LensInfo?,
-    onLensSelected: (LensInfo) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier) {
-        // Current lens button - compact circular design
-        IconButton(
-            onClick = { expanded = !expanded },
-            modifier = Modifier
-                .size(40.dp)
-                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-        ) {
-            // Extract zoom level from display name (e.g., "Wide (1x)" -> "1x")
-            val zoomLabel = currentLens?.displayName?.let { name ->
-                val match = Regex("""\(([\d.]+x)\)""").find(name)
-                match?.groupValues?.get(1) ?: "1x"
-            } ?: "1x"
-
-            Text(
-                text = zoomLabel,
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Dropdown menu
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.background(Color.Black.copy(alpha = 0.9f))
-        ) {
-            availableLenses.forEach { lens ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val icon = when (lens.type) {
-                                LensType.ULTRA_WIDE -> Icons.Default.CameraAlt
-                                LensType.WIDE -> Icons.Default.PhotoCamera
-                                LensType.NORMAL -> Icons.Default.PhotoCamera
-                                LensType.TELEPHOTO -> Icons.Default.ZoomIn
-                                LensType.MACRO -> Icons.Default.CenterFocusStrong
-                                LensType.UNKNOWN -> Icons.Default.CameraAlt
-                            }
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = if (currentLens?.id == lens.id) Color.Cyan else Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = lens.displayName,
-                                color = if (currentLens?.id == lens.id) Color.Cyan else Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = if (currentLens?.id == lens.id) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    },
-                    onClick = {
-                        onLensSelected(lens)
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
-}
 

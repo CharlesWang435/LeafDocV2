@@ -33,7 +33,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.leafdoc.app.data.model.DiagnosisStatus
 import com.leafdoc.app.data.model.LeafSession
-import com.leafdoc.app.ui.components.ZoomableImageDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -53,15 +52,17 @@ fun GalleryScreen(
 
     var showFilterMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     if (isSelectionMode) {
                         Text("${selectedSessions.size} selected")
                     } else {
-                        Text("Leaf Gallery")
+                        Text("Gallery")
                     }
                 },
                 navigationIcon = {
@@ -154,9 +155,9 @@ fun GalleryScreen(
                         onClick = {
                             if (isSelectionMode) {
                                 viewModel.toggleSessionSelection(session.id)
+                            } else {
+                                onNavigateToSession(session.id)
                             }
-                            // When not in selection mode, tapping the image opens preview
-                            // The onNavigateToSession is now triggered from the preview dialog
                         },
                         onLongClick = {
                             viewModel.toggleSessionSelection(session.id)
@@ -197,11 +198,17 @@ fun GalleryScreen(
         )
     }
 
-    // Show snackbar for messages/errors
+    // Show snackbars for messages / errors
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
-            // Show snackbar
+            snackbarHostState.showSnackbar(it)
             viewModel.clearMessage()
+        }
+    }
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
         }
     }
 }
@@ -218,7 +225,6 @@ private fun SessionCard(
     onNavigateToResults: (String) -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) }
-    var showZoomDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -246,7 +252,7 @@ private fun SessionCard(
             if (coverImagePath != null) {
                 AsyncImage(
                     model = coverImagePath,
-                    contentDescription = "Leaf image - tap to view, long press for options",
+                    contentDescription = "Leaf image - tap to open, long press to select",
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(isSelectionMode) {
@@ -255,7 +261,7 @@ private fun SessionCard(
                                     if (isSelectionMode) {
                                         onClick()
                                     } else {
-                                        showZoomDialog = true
+                                        onNavigateToResults(session.id)
                                     }
                                 },
                                 onLongPress = {
@@ -345,7 +351,7 @@ private fun SessionCard(
                             fontSize = 11.sp
                         )
                         Text(
-                            text = "${session.segmentCount} segments",
+                            text = "${session.segmentCount} ${if (session.segmentCount == 1) "frame" else "frames"}",
                             color = Color.White.copy(alpha = 0.8f),
                             fontSize = 11.sp
                         )
@@ -364,15 +370,6 @@ private fun SessionCard(
         }
     }
 
-    // Zoom dialog with "View Results" button
-    if (showZoomDialog && coverImagePath != null) {
-        ZoomableImageDialog(
-            imagePath = coverImagePath,
-            onDismiss = { showZoomDialog = false },
-            onViewResults = onNavigateToResults,
-            sessionId = session.id
-        )
-    }
 }
 
 @Composable
