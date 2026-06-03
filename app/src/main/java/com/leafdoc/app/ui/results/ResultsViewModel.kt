@@ -93,7 +93,14 @@ class ResultsViewModel @Inject constructor(
      * frame is chosen: the stitched panorama if present, otherwise the first segment.
      */
     private fun mainImagePath(): String? =
-        session.value?.stitchedImagePath ?: segments.value.firstOrNull()?.imagePath
+        session.value?.stitchedImagePath ?: segments.value.firstOrNull()?.let { decodablePath(it) }
+
+    /** A BitmapFactory-decodable path for a segment (its JPEG thumbnail proxy if TIFF/DNG). */
+    private fun decodablePath(seg: LeafSegment): String? {
+        val p = seg.imagePath.lowercase()
+        val ok = p.endsWith(".jpg") || p.endsWith(".jpeg") || p.endsWith(".png") || p.endsWith(".webp")
+        return if (ok) seg.imagePath else seg.thumbnailPath
+    }
 
     /**
      * Analyze the session. Pass [segmentPath] to diagnose a specific captured frame
