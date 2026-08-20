@@ -20,21 +20,17 @@ Only providers with a key present are selectable; the rest are shown with a **NO
 | Provider | Model ID in code | Source file | Default |
 | --- | --- | --- | --- |
 | Google Gemini | `gemini-2.5-flash` | `GeminiAiProvider.kt` | Yes |
+| Anthropic Claude | `claude-sonnet-5` | `ClaudeAiProvider.kt` | No |
 | OpenAI | `gpt-4o` | `ChatGptAiProvider.kt` | No |
-| Anthropic Claude | `claude-3-5-sonnet-20241022` | `ClaudeAiProvider.kt` | No — **action required, see below** |
 
-### Action required: the Claude model ID is retired
+### Note on the Claude provider
 
-`claude-3-5-sonnet-20241022` was retired on 28 October 2025 and now returns HTTP 404. Any diagnosis routed to the Claude provider will fail until the model constant is updated.
+The Claude provider previously targeted `claude-3-5-sonnet-20241022`, which was retired on 28 October 2025 and returns HTTP 404. It now targets `claude-sonnet-5`, the current Sonnet-tier model; `claude-opus-5` is the higher-capability alternative if diagnosis quality matters more than cost.
 
-The fix is a one-line change in `ClaudeAiProvider.kt`:
+Two details of that provider are deliberate and worth knowing before changing them:
 
-```kotlin
-// app/src/main/java/com/leafdoc/app/data/remote/ai/ClaudeAiProvider.kt
-private const val CLAUDE_MODEL = "claude-sonnet-5"   // replaces claude-3-5-sonnet-20241022
-```
-
-`claude-sonnet-5` is the current Sonnet-tier model and is the documented replacement for Claude 3.5 Sonnet; `claude-opus-5` is the higher-capability alternative. No other change to the request shape is required for this provider's current usage.
+- **Thinking is explicitly disabled** (`"thinking": {"type": "disabled"}`). Current Claude models otherwise run adaptive thinking, which shares the `max_tokens` budget with the answer — with the 2,048-token budget used here, a long reasoning pass can truncate the JSON before it is complete. To enable thinking instead, remove that field and raise `maxTokens` to roughly 8,000.
+- **Response content blocks are parsed by `type`**, not by position, so a leading non-text block does not break parsing.
 
 ---
 
@@ -118,7 +114,8 @@ No image or metadata is transmitted unless a user explicitly starts an analysis.
 | Symptom | Cause and resolution |
 | --- | --- |
 | Provider shows **NOT CONFIGURED** | The key is missing from `local.properties`, or the project was not rebuilt after adding it. Run `./gradlew clean assembleDebug`. |
-| Claude analyses fail with a 404 | The configured model ID is retired — see [Action required](#action-required-the-claude-model-id-is-retired). |
+| Claude analyses fail with a 404 | The configured model ID no longer exists. Model IDs are retired over time; check the current list in the [Anthropic model documentation](https://platform.claude.com/docs/en/about-claude/models/overview) and update `CLAUDE_MODEL` in `ClaudeAiProvider.kt`. |
+| Analysis returns a JSON parsing error | The response was truncated before the JSON closed. Raise `maxTokens` in the provider, or select a shorter analysis template. |
 | `401` / authentication error | The key is invalid, revoked, or belongs to a different organisation. Verify it in the provider console. |
 | `429` / rate-limit error | Wait and retry, switch providers temporarily, or raise the account's limits. |
 | Analysis fails with no clear error | Check connectivity, then inspect Logcat — providers log request failures through Timber (debug builds log at all levels; release builds log warnings and errors only). |
