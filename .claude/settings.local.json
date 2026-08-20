@@ -34,7 +34,8 @@
       "Bash(rm:*)",
       "Bash(git archive:*)",
       "PowerShell($g = Get-ChildItem \"C:\\\\Program Files\\\\Git\\\\bin\\\\git.exe\",\"C:\\\\Program Files \\(x86\\)\\\\Git\\\\bin\\\\git.exe\" -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($g\\) { & $g.FullName log --oneline -12; & $g.FullName remote -v } else { Write-Output \"git not found\" })",
-      "Skill(claude-api)"
+      "Skill(claude-api)",
+      "PowerShell($j = \\(Get-Command java -ErrorAction SilentlyContinue\\).Source; if \\($j\\) { Write-Output \"java: $j\"; java -version } else { Write-Output \"no java on PATH\" }; Write-Output \"JAVA_HOME=$env:JAVA_HOME\"; $studio = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\\\\java.exe\"; if \\(Test-Path $studio\\) { Write-Output \"studio jbr present: $studio\" } else { Write-Output \"no studio jbr at default path\" })"
     ],
     "deny": [],
     "ask": []

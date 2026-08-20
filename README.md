@@ -106,11 +106,11 @@ Horizontal panorama stitching with linear gradient blending, plus optional midri
 
 Diagnosis is provided by a pluggable provider interface, so the analysis model is a user setting rather than a build-time decision.
 
-| Provider | Model configured in code | Status |
-| --- | --- | --- |
-| Google Gemini | `gemini-2.5-flash` | Default provider |
-| OpenAI | `gpt-4o` | Optional |
-| Anthropic Claude | `claude-3-5-sonnet-20241022` | **Requires update** — this model ID has been retired and now returns HTTP 404. See [AI provider setup](AI_PROVIDERS_SETUP.md). |
+| Provider | Model configured in code |
+| --- | --- |
+| Google Gemini | `gemini-2.5-flash` (default provider) |
+| Anthropic Claude | `claude-sonnet-5` |
+| OpenAI | `gpt-4o` |
 
 Four prompt templates — quick check, standard analysis, detailed pathology report, and research-grade — share a common corn-disease reference set and a single JSON output contract, so results are directly comparable across providers and templates. All four are written specifically for transmittance imagery: they instruct the model to read the symptoms that backlighting reveals, such as interveinal chlorosis, translucent flecking, and water-soaked lesions, rather than surface appearance alone. Every analysis returns a health score, a primary diagnosis with a confidence value, per-disease probabilities, and treatment recommendations. Any image can be re-analysed with a different provider or template.
 
@@ -210,7 +210,6 @@ Images and metadata are stored locally on the device; there is no LeafDoc backen
 
 - **Full-sensor 50/200 MP capture** depends on the device exposing the standard Camera2 maximum-resolution stream map. Several manufacturers gate their highest-resolution mode behind a vendor SDK; on those devices LeafDoc captures the device's standard maximum and offers RAW/DNG as the uncompressed alternative.
 - **TIFF and RAW/DNG masters cannot be decoded by Android**, so in-app preview and AI analysis operate on a JPEG proxy. Exported masters are unaffected.
-- **The Anthropic Claude provider currently targets a retired model ID** (`claude-3-5-sonnet-20241022`) and will fail until the constant in `ClaudeAiProvider` is updated to a current model.
 - **Focus peaking and zebra (overexposure) toggles** are present in Settings and their analysers are implemented, but the corresponding preview overlays are not yet drawn.
 - **The project currently has no automated test suite**; `./gradlew test` succeeds with no tests to run.
 

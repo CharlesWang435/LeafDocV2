@@ -32,7 +32,7 @@ class ClaudeAiProvider @Inject constructor(
 
     companion object {
         private const val CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-        private const val CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
+        private const val CLAUDE_MODEL = "claude-sonnet-5"
         private const val CLAUDE_API_VERSION = "2023-06-01"
         private const val MAX_IMAGE_SIZE_BYTES = 5_000_000 // 5MB limit for Claude
     }
@@ -70,7 +70,8 @@ class ClaudeAiProvider @Inject constructor(
                             )
                         )
                     )
-                )
+                ),
+                thinking = ClaudeThinking("disabled")
             )
 
             val requestBodyJson = gson.toJson(requestBody)
@@ -129,12 +130,10 @@ class ClaudeAiProvider @Inject constructor(
             val claudeResponse = gson.fromJson(responseBody, ClaudeResponse::class.java)
 
             // Extract text content from response
-            val textContent = claudeResponse.content
-                .firstOrNull { it is ClaudeResponseContent.TextContent }
-                as? ClaudeResponseContent.TextContent
+            val responseText = claudeResponse.content
+                .firstOrNull { it.type == "text" && !it.text.isNullOrBlank() }
+                ?.text
                 ?: throw Exception("No text content in Claude response")
-
-            val responseText = textContent.text
 
             // Extract JSON from response
             val jsonText = extractJsonFromResponse(responseText)
@@ -203,7 +202,15 @@ private data class ClaudeRequest(
     val model: String,
     @SerializedName("max_tokens")
     val maxTokens: Int,
-    val messages: List<ClaudeMessage>
+    val messages: List<ClaudeMessage>,
+    // Current Claude models run adaptive thinking when this is omitted, which shares the
+    // max_tokens budget with the answer and can truncate the JSON. This task needs a
+    // structured extraction rather than reasoning, so thinking is turned off explicitly.
+    val thinking: ClaudeThinking? = null
+)
+
+private data class ClaudeThinking(
+    val type: String
 )
 
 private data class ClaudeMessage(
@@ -237,12 +244,13 @@ private data class ClaudeResponse(
     val role: String
 )
 
-private sealed class ClaudeResponseContent {
-    data class TextContent(
-        val type: String,
-        val text: String
-    ) : ClaudeResponseContent()
-}
+// Deliberately a concrete class rather than a sealed hierarchy: Gson cannot instantiate an
+// abstract type when deserializing, so a sealed content block fails to parse at runtime.
+// Blocks other than text (e.g. thinking) arrive with a null `text` and are skipped.
+private data class ClaudeResponseContent(
+    val type: String,
+    val text: String?
+)
 
 // Diagnosis result parsing models
 private data class ClaudeDiagnosisResult(

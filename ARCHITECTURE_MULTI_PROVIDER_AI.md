@@ -45,7 +45,7 @@ The system follows the **Strategy Pattern** for AI providers and **Template Meth
 ├─────────────────────────────────────────────────────────────────┤
 │  AiProviderFactory                                              │
 │  ├── GeminiAiProvider    (gemini-2.5-flash)                    │
-│  ├── ClaudeAiProvider    (model ID retired — see setup guide)  │
+│  ├── ClaudeAiProvider    (claude-sonnet-5)                     │
 │  └── ChatGptAiProvider   (gpt-4o)                              │
 │                                                                  │
 │  All implement: AiProvider interface                            │
@@ -612,8 +612,8 @@ The design goals of this layer are:
 
 ### Known gaps
 
-- The Claude provider's model ID is retired and must be updated before that provider can be used.
-- No automated tests cover this layer.
+- No automated tests cover this layer. The Claude provider in particular has been corrected but not exercised against the live API.
+- Provider model IDs are compile-time constants. Vendors retire models on their own schedules, so these need periodic review — a retired ID surfaces only as a runtime 404.
 - API keys are compiled into `BuildConfig` and are recoverable from a distributed APK; a server-side proxy is required for any public distribution.
 - There is no automatic failover between providers; a failed analysis must be retried by the user.
 
