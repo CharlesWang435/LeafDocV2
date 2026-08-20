@@ -1,6 +1,8 @@
 # Multi-Provider AI Architecture
 
-This document describes the architecture for LeafDoc's multi-provider AI diagnosis system with premade prompt templates.
+This document describes the design of LeafDoc's AI diagnosis layer: a provider-agnostic interface over Google Gemini, Anthropic Claude, and OpenAI, combined with a library of curated prompt templates.
+
+**Scope.** This is a design reference for contributors working on `data/remote/ai/`. For key configuration, provider selection, and troubleshooting, see [AI_PROVIDERS_SETUP.md](AI_PROVIDERS_SETUP.md). Sections marked *proposed* describe work that is designed but not yet implemented.
 
 ## Architecture Overview
 
@@ -42,9 +44,9 @@ The system follows the **Strategy Pattern** for AI providers and **Template Meth
 │                      AI Provider Layer                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  AiProviderFactory                                              │
-│  ├── GeminiAiProvider    (Gemini 2.5 Flash)                   │
-│  ├── ClaudeAiProvider    (Claude 3.5 Sonnet)                  │
-│  └── ChatGptAiProvider   (GPT-4o)                              │
+│  ├── GeminiAiProvider    (gemini-2.5-flash)                    │
+│  ├── ClaudeAiProvider    (model ID retired — see setup guide)  │
+│  └── ChatGptAiProvider   (gpt-4o)                              │
 │                                                                  │
 │  All implement: AiProvider interface                            │
 │  └── analyzeLeafImage(bitmap, promptText) -> DiagnosisDisplay  │
@@ -367,7 +369,9 @@ Each `PromptTemplate` has:
 
 ---
 
-## Testing Strategy
+## Testing Strategy (proposed)
+
+The project has no automated test suite at present; the JVM and instrumentation source sets are empty. The cases below describe the intended coverage for this layer and are provided as a specification for the first tests to be written.
 
 ### Unit Tests
 
@@ -512,7 +516,7 @@ class DiagnosisRepository @Inject constructor(
 
 ---
 
-## Future Enhancements
+## Roadmap (not implemented)
 
 ### 1. Custom Prompt Editor
 
@@ -596,22 +600,23 @@ No new dependencies required. The implementation uses existing:
 
 ---
 
-## Conclusion
+## Summary
 
-This architecture provides:
+The design goals of this layer are:
 
-1. **Flexibility**: Easy to add new providers or prompt templates
-2. **Maintainability**: Clear separation of concerns
-3. **Testability**: Each component testable in isolation
-4. **User Control**: Simple UI for provider/template selection
-5. **Security**: Secure API key management
-6. **Performance**: Efficient bitmap handling and caching
-7. **Scalability**: Supports future enhancements
+1. **Extensibility** — adding a provider or prompt template requires no change to calling code.
+2. **Separation of concerns** — UI, repository, provider, and prompt responsibilities are distinct.
+3. **Testability** — each component can be exercised in isolation (see *Testing Strategy (proposed)* above).
+4. **User control** — provider and template are runtime settings, persisted in DataStore.
+5. **Predictable output** — every provider returns the same `DiagnosisDisplay` contract, so results stay comparable.
 
-The system is production-ready and follows Android best practices for MVVM architecture, dependency injection, and reactive programming with Kotlin Flows.
+### Known gaps
+
+- The Claude provider's model ID is retired and must be updated before that provider can be used.
+- No automated tests cover this layer.
+- API keys are compiled into `BuildConfig` and are recoverable from a distributed APK; a server-side proxy is required for any public distribution.
+- There is no automatic failover between providers; a failed analysis must be retried by the user.
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2025-12-12
-**Author**: Claude Opus 4.5
+**Document version**: 1.1 · **Last reviewed**: 2026-08-20
