@@ -32,7 +32,9 @@
       "Bash(python create_timeline.py:*)",
       "Bash(dir nul:*)",
       "Bash(rm:*)",
-      "Bash(git archive:*)"
+      "Bash(git archive:*)",
+      "PowerShell($g = Get-ChildItem \"C:\\\\Program Files\\\\Git\\\\bin\\\\git.exe\",\"C:\\\\Program Files \\(x86\\)\\\\Git\\\\bin\\\\git.exe\" -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($g\\) { & $g.FullName log --oneline -12; & $g.FullName remote -v } else { Write-Output \"git not found\" })",
+      "Skill(claude-api)"
     ],
     "deny": [],
     "ask": []
