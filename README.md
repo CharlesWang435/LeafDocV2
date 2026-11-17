@@ -57,7 +57,7 @@ The enclosure went through several print revisions before the current clamp-and-
 <img src="images/leafdoc-revisions.webp" width="760" alt="Successive 3D-printed enclosure revisions arranged left to right, ending in the current handheld clamp design"/>
 </div>
 
-> The application does not require the enclosure — any backlit leaf will do, and the camera works handheld — but the prompt templates and the stitching workflow both assume transmittance imagery. Mechanical design files are not part of this repository.
+> The application does not require the enclosure — any backlit leaf will do, and the camera works handheld — but the prompt templates and the stitching workflow both assume transmittance imagery. Mechanical design files (Fusion CAD, print-ready STLs, bill of materials and build notes) are in [`hardware/`](hardware/README.md).
 
 ---
 
